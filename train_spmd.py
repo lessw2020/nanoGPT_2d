@@ -27,7 +27,43 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
+
 from model import GPTConfig, GPT
+
+import numpy as np
+import torch
+import torch.distributed as dist
+import torch.fx as fx
+import torch.nn as nn
+from torch.distributed._spmd.api import (
+    COMPILED_OBJECT_KEY,
+    Override,
+    Schema,
+    SPMD,
+    compile,
+)
+from torch.distributed._spmd.comm_tensor import CommTensor
+from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.distributed_c10d import get_global_rank, get_world_size
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms as base_with_comms,
+)
+import os
+
+# ---- update ops
+from torch.distributed._tensor.device_mesh import (
+    get_global_device_mesh,
+    set_global_device_mesh,
+)
+
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -53,7 +89,7 @@ n_layer = 12
 n_head = 12
 n_embd = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
-bias = True  # do we use bias inside LayerNorm and Linear layers?
+bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
@@ -73,7 +109,7 @@ device = (
     "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 )
 dtype = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-compile = True  # use PyTorch 2.0 to compile the model to be faster
+dynamo_compile = True  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [
     k
@@ -86,6 +122,8 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 
 # various inits, derived attributes, I/O setup
 ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
+assert ddp, " not running DDP"
+print(f"DDP is running...")
 if ddp:
     init_process_group(backend=backend)
     ddp_rank = int(os.environ["RANK"])
@@ -94,6 +132,8 @@ if ddp:
     torch.cuda.set_device(device)
     master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
     seed_offset = ddp_rank  # each process gets a different seed
+    world_size = int(os.environ["WORLD_SIZE"])
+
 else:
     # if not ddp, we are running on a single gpu, and one process
     master_process = True
@@ -103,10 +143,13 @@ else:
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(1337 + seed_offset)
-torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
-device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
+# torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+# torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+device_type = (
+    "cuda"  #  if "cuda" in device else "cpu"  # for later use in torch.autocast
+)
 # note: float16 data type will automatically use a GradScaler
+# dtype = "float32"
 ptdtype = {
     "float32": torch.float32,
     "bfloat16": torch.bfloat16,
@@ -169,6 +212,7 @@ model_args = dict(
     vocab_size=None,
     dropout=dropout,
 )  # start with model_args from command line
+
 if init_from == "scratch":
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -180,6 +224,7 @@ if init_from == "scratch":
     model_args["vocab_size"] = meta_vocab_size if meta_vocab_size is not None else 50304
     gptconf = GPTConfig(**model_args)
     model = GPT(gptconf)
+    print(f"model = {model=}")
 elif init_from == "resume":
     print(f"Resuming training from {out_dir}")
     # resume training from a checkpoint.
@@ -217,7 +262,12 @@ if block_size < model.config.block_size:
     model_args[
         "block_size"
     ] = block_size  # so that the checkpoint will have the right value
-model.to(device)
+
+_device = "cuda"
+model.to(_device)
+
+# mesh =
+
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
@@ -226,18 +276,38 @@ scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 optimizer = model.configure_optimizers(
     weight_decay, learning_rate, (beta1, beta2), device_type
 )
+
 if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
 
 # compile the model
-if compile:
+dynamo_compile = False
+if dynamo_compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
+# if ddp:
+# model = DDP(model, device_ids=[ddp_local_rank])
+
+_mesh = DeviceMesh(_device, torch.arange(world_size))
+set_global_device_mesh(_mesh)
+myrank = dist.get_rank()
+if myrank == 0:
+    print(f"train mesh = {_mesh}")
+    print(f"{optimizer=}")
+
+
+"""model = SPMD(
+    model,
+    schema=Schema(
+        mesh=_mesh,
+        placements=[Replicate()],
+    ),
+    # input_schemas=kwargs["inp_schemas"] if "inp_schemas" in kwargs else None,
+)
+"""
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -282,8 +352,38 @@ if wandb_log and master_process:
 X, Y = get_batch("train")  # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
-raw_model = model.module if ddp else model  # unwrap DDP container if needed
+# raw_model = model.module if ddp else model  # unwrap DDP container if needed
 running_mfu = -1.0
+lr = 0.001
+
+train_iters: int = 10
+my_rank = dist.get_rank()
+
+
+def zero_print(msg):
+    if my_rank == 0:
+        print(f"{msg}")
+
+
+@compile()
+def train_loop(mod, opt, inp):
+    # for i in range(train_iters):
+    zero_print(f"compile train loop, ")
+    X, Y = inp
+    logits, loss = mod(X, Y)
+    loss.backward()
+    zero_print(f"tl after backward")
+    opt.step()
+    zero_print(f"tl after step")
+    opt.zero_grad(set_to_none=True)
+    zero_print(f"tl zero grads")
+
+
+for i in range(2):
+    X, Y = get_batch("train")
+    train_loop(model, optimizer, inp=(X, Y))
+
+assert False, f" auto stop"
 while True:
     # determine and set the learning rate for this iteration
     lr = get_lr(iter_num) if decay_lr else learning_rate
@@ -308,7 +408,7 @@ while True:
             )
         if losses["val"] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses["val"]
-            if iter_num > 0:
+            if iter_num > 5000:
                 checkpoint = {
                     "model": raw_model.state_dict(),
                     "optimizer": optimizer.state_dict(),
