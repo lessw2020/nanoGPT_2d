@@ -291,14 +291,14 @@ if dynamo_compile:
 # if ddp:
 # model = DDP(model, device_ids=[ddp_local_rank])
 
-_mesh = DeviceMesh(_device, torch.arange(world_size))
-set_global_device_mesh(_mesh)
-myrank = dist.get_rank()
-if myrank == 0:
-    print(f"train mesh = {_mesh}")
-    print(f"{optimizer=}")
+# _mesh = DeviceMesh(_device, torch.arange(world_size))
+# set_global_device_mesh(_mesh)
+# myrank = dist.get_rank()
+# if myrank == 0:
+#   print(f"train mesh = {_mesh}")
+#    print(f"{optimizer=}")
 
-
+#
 """model = SPMD(
     model,
     schema=Schema(
