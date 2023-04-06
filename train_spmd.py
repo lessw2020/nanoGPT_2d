@@ -82,7 +82,7 @@ wandb_run_name = "gpt2"  # 'run' + str(time.time())
 # data
 dataset = "openwebtext"
 gradient_accumulation_steps = 5  # used to simulate larger batch sizes
-batch_size = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 8  # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
 n_layer = 12
@@ -109,7 +109,7 @@ device = (
     "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 )
 dtype = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-dynamo_compile = True  # use PyTorch 2.0 to compile the model to be faster
+dynamo_compile = False  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [
     k
@@ -149,7 +149,7 @@ device_type = (
     "cuda"  #  if "cuda" in device else "cpu"  # for later use in torch.autocast
 )
 # note: float16 data type will automatically use a GradScaler
-# dtype = "float32"
+dtype = "bfloat16"
 ptdtype = {
     "float32": torch.float32,
     "bfloat16": torch.bfloat16,
@@ -289,7 +289,10 @@ if dynamo_compile:
 
 # wrap model into DDP container
 # if ddp:
-# model = DDP(model, device_ids=[ddp_local_rank])
+# model = DDP(
+#    model,
+#   device_ids=[ddp_local_rank],
+# )  #  find_unused_parameters=False)
 
 # _mesh = DeviceMesh(_device, torch.arange(world_size))
 # set_global_device_mesh(_mesh)
@@ -366,22 +369,23 @@ def zero_print(msg):
 
 
 @compile()
-def train_loop(mod, opt, inp):
+def train_loop(model, opt, inp):
     # for i in range(train_iters):
     zero_print(f"compile train loop, ")
     X, Y = inp
-    logits, loss = mod(X, Y)
+    logits, loss = model(X, Y)
     loss.backward()
     zero_print(f"tl after backward")
     opt.step()
     zero_print(f"tl after step")
-    opt.zero_grad(set_to_none=True)
+    opt.zero_grad()  # set_to_none=True)
     zero_print(f"tl zero grads")
 
 
+model.train()
 for i in range(2):
-    X, Y = get_batch("train")
     train_loop(model, optimizer, inp=(X, Y))
+    X, Y = get_batch("train")
 
 assert False, f" auto stop"
 while True:

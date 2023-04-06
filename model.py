@@ -241,10 +241,12 @@ class GPT(nn.Module):
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
             print(f"logits shape {logits.shape}")
+            print(f"targets {targets.shape=}")
             # loss = logits.sum()
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
             #    logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
             # )
+            # assert False, "remove this"
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(
