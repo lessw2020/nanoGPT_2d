@@ -51,8 +51,10 @@ def _nll_foward_rule(op_schema: OpSchema) -> OutputSharding:
 
     output_spec = DTensorSpec(
         mesh=input_tensor.mesh,
-        placements=[input_tensor.placements],
+        # trying to force input tensor to shard and match target tensor placement
+        placements=[target_tensor.placements, target_tensor.placements],
     )
+
     # TODO - remove this, not correct to adjust incoming spec...temp test only
     input_tensor.placements = [Shard(dim=0)]
     print(f"{input_tensor.placements=}")
