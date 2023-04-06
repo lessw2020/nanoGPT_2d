@@ -39,36 +39,64 @@ def _prop__foreach_unaop(op_schema: OpSchema) -> OutputSharding:
     ]
 )
 def _nll_foward_rule(op_schema: OpSchema) -> OutputSharding:
-    # global_device_mesh = get_global_device_mesh()
-    _rank = dist.get_rank()
-    args = op_schema.args_schema
-    input_mesh = args[0].mesh
-    in_placements = args[0].placements
-    in_tensor_meta = args[0].tensor_meta
-    target_dtensor = args[1]
-    target_placements = target_dtensor.placements
-    target_mesh = target_dtensor.mesh
-    target_meta = target_dtensor.tensor_meta
-    weights = args[2]
-    reduction = args[3]
-    ignore = args[4]
+    (input_tensor, target_tensor, weights, reduction, ignore) = op_schema.args_schema
 
-    """in_args=
-    0 (DTensorSpec(mesh=DeviceMesh:([0, 1]), placements=[Replicate()], 
-    tensor_meta=TensorMetadata(shape=torch.Size([32768, 65]), 
-    dtype=torch.float32, requires_grad=False, stride=(65, 1), memory_format=torch.contiguous_format, 
-    is_quantized=False, qparams={})), 
-    1 DTensorSpec(mesh=DeviceMesh:([0, 1]), placements=[Shard(dim=0)], 
-    tensor_meta=TensorMetadata(shape=torch.Size([32768]), dtype=torch.int64, requires_grad=False, stride=(1,), 
-    memory_format=torch.contiguous_format, is_quantized=False, qparams={})), 
-    None, 1, -100)
-    """
+    assert isinstance(
+        input_tensor, DTensorSpec
+    ), f"got type {type(input_tensor)}, expected DTensorSpec"
+
+    assert isinstance(
+        target_tensor, DTensorSpec
+    ), f"got type {type(target_tensor)}, expected DTensorSpec"
+
+    output_spec = DTensorSpec(
+        mesh=input_tensor.mesh,
+        placements=[input_tensor.placements],
+    )
+    # TODO - remove this, not correct to adjust incoming spec...temp test only
+    input_tensor.placements = [Shard(dim=0)]
+    print(f"{input_tensor.placements=}")
+
+    res = OutputSharding(
+        output_spec=(input_tensor, target_tensor)
+        # tensor_meta=input.tensor_meta,
+    )
+    return res
+
+    # input_mesh = input_tensor.mesh
+    # assert weights is None, f"nll_forward_rule does not support weights yet."
     # in tensor = [32768, 65], stride = (65,1) placements = Replicate()
-    # out tensor = 32768, stride = 1
+    # target tensor = 32768, stride = 1
     # None
     # 1
     # -100
+    """num_classes = input_tensor.tensor_meta.shape[-1]
+    num_dims = len(input_tensor.tensor_meta.shape)
 
+    if _rank == 0:
+        print(f"nll, {num_classes=}\n")
+        print(f"nll, num dims = {num_dims=}")
+
+    channel_dim = 1
+    if num_dims < 2:
+        channel_dim = 0
+
+    target = target_tensor._local_tensor
+
+    safe_target = torch.where(target != ignore_index, target, 0)
+    safe_target_ = safe_target.unsqueeze(channel_dim)
+    # target can be [N, 1] or [1]
+
+    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
+
+    result = torch.where(target != ignore_index, result, 0)
+
+    if reduction == Reduction.SUM.value:
+        result = result.sum()
+    elif reduction == Reduction.MEAN.value:
+        result = result.sum() / total_weight
+    """
+    """
     new_placements = [_Partial(0)]  # * global_device_mesh.ndim
     if _rank == 0:
         print(f"101 {input_mesh=}, {input_mesh.ndim=}")
@@ -81,18 +109,11 @@ def _nll_foward_rule(op_schema: OpSchema) -> OutputSharding:
         print(f"101 ops {input=}\n")
 
         print(f"103 ops, {new_placements=}")
-
-    res = OutputSharding(
-        output_spec=DTensorSpec(
-            mesh=input_mesh,
-            placements=new_placements,  # [Shard(0)] * global_device_mesh.ndim,
-            # tensor_meta=input.tensor_meta,
-        )
-    )
-    return res
+    """
 
 
-"""def nll_forward_rule(op_schema: OpSchema) -> OutputSharding:
+"""
+def nll_forward_rule(op_schema: OpSchema) -> OutputSharding:
     def nll_loss_forward(
     self: Tensor,
     target: Tensor,
