@@ -5,7 +5,6 @@ import torch
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
-import torch.distributed as dist
 
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -31,152 +30,6 @@ def _prop__foreach_unaop(op_schema: OpSchema) -> OutputSharding:
     # FIXME(@mrshenli): for sqrt, this is only mathematically correct for
     # Replicate and Shard tensor.
     return OutputSharding(output_spec=self)
-
-
-@register_prop_rule(
-    [
-        aten.nll_loss_forward.default,
-    ]
-)
-def _nll_foward_rule(op_schema: OpSchema) -> OutputSharding:
-    (input_tensor, target_tensor, weights, reduction, ignore) = op_schema.args_schema
-
-    assert isinstance(
-        input_tensor, DTensorSpec
-    ), f"got type {type(input_tensor)}, expected DTensorSpec"
-
-    assert isinstance(
-        target_tensor, DTensorSpec
-    ), f"got type {type(target_tensor)}, expected DTensorSpec"
-
-    output_spec = DTensorSpec(
-        mesh=input_tensor.mesh,
-        # trying to force input tensor to shard and match target tensor placement
-        placements=[target_tensor.placements, target_tensor.placements],
-    )
-
-    # TODO - remove this, not correct to adjust incoming spec...temp test only
-    input_tensor.placements = [Shard(dim=0)]
-    print(f"{input_tensor.placements=}")
-
-    res = OutputSharding(
-        output_spec=(input_tensor, target_tensor)
-        # tensor_meta=input.tensor_meta,
-    )
-    return res
-
-    # input_mesh = input_tensor.mesh
-    # assert weights is None, f"nll_forward_rule does not support weights yet."
-    # in tensor = [32768, 65], stride = (65,1) placements = Replicate()
-    # target tensor = 32768, stride = 1
-    # None
-    # 1
-    # -100
-    """num_classes = input_tensor.tensor_meta.shape[-1]
-    num_dims = len(input_tensor.tensor_meta.shape)
-
-    if _rank == 0:
-        print(f"nll, {num_classes=}\n")
-        print(f"nll, num dims = {num_dims=}")
-
-    channel_dim = 1
-    if num_dims < 2:
-        channel_dim = 0
-
-    target = target_tensor._local_tensor
-
-    safe_target = torch.where(target != ignore_index, target, 0)
-    safe_target_ = safe_target.unsqueeze(channel_dim)
-    # target can be [N, 1] or [1]
-
-    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-
-    result = torch.where(target != ignore_index, result, 0)
-
-    if reduction == Reduction.SUM.value:
-        result = result.sum()
-    elif reduction == Reduction.MEAN.value:
-        result = result.sum() / total_weight
-    """
-    """
-    new_placements = [_Partial(0)]  # * global_device_mesh.ndim
-    if _rank == 0:
-        print(f"101 {input_mesh=}, {input_mesh.ndim=}")
-        out_placements = op_schema.args_schema[1]
-        print(f"103, {out_placements=}\n")
-        in_args = op_schema.args_schema
-        print(f"101 {in_args=}\n")
-        print(f"102 global mesh dim {input_mesh.ndim=}\n")
-        input = op_schema.args_schema[0]
-        print(f"101 ops {input=}\n")
-
-        print(f"103 ops, {new_placements=}")
-    """
-
-
-"""
-def nll_forward_rule(op_schema: OpSchema) -> OutputSharding:
-    def nll_loss_forward(
-    self: Tensor,
-    target: Tensor,
-    weight: Optional[Tensor],
-    reduction: int,
-    ignore_index: int,
-) -> Tuple[Tensor, Tensor]:
-    assert self.dim() > 0 and self.dim() <= 2, "input tensor should be 1D or 2D"
-    assert (
-        target.dim() <= 1
-    ), "0D or 1D target tensor expected, multi-target not supported"
-
-    no_batch_dim = self.dim() == 1 and target.dim() == 0
-    assert no_batch_dim or (
-        self.shape[0] == target.shape[0]
-    ), f"size mismatch (got input: {self.shape}, target: {target.shape})"
-
-    n_classes = self.shape[-1]
-
-    assert weight is None or (
-        weight.dim() == 1 and weight.numel() == n_classes
-    ), f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"  # noqa: B950
-
-    # self can be [N, C] or [C]
-    # target can be [N] or []
-
-    n_dims = self.dim()
-    channel_dim = 1
-    if n_dims < 2:
-        channel_dim = 0
-
-    if weight is not None:
-        w = weight.unsqueeze(0) if n_dims > 1 else weight
-        self = self * w
-    safe_target = torch.where(target != ignore_index, target, 0)
-    safe_target_ = safe_target.unsqueeze(channel_dim)
-    # target can be [N, 1] or [1]
-
-    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-
-    result = torch.where(target != ignore_index, result, 0)
-
-    if reduction == Reduction.NONE.value and n_dims > 1:
-        total_weight = self.new_full((), 0.0)
-        return result, total_weight
-
-    if weight is not None:
-        w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
-        wsum = torch.where(target != ignore_index, wsum, 0)
-        total_weight = wsum.sum()
-    else:
-        total_weight = (target != ignore_index).sum().to(self)
-
-    if reduction == Reduction.SUM.value:
-        result = result.sum()
-    elif reduction == Reduction.MEAN.value:
-        result = result.sum() / total_weight
-
-    return result, total_weight
-"""
 
 
 @register_prop_rule(  # pyre-ignore
@@ -317,6 +170,54 @@ def _prop__fused_adam(op_schema: OpSchema):
         return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)  # type: ignore[arg-type]
 
 
+@register_prop_rule(aten.nll_loss_forward.default)  # pyre-ignore
+def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
+    self, target = op_schema.args_schema[:2]
+    assert isinstance(self, DTensorSpec)
+    assert isinstance(target, DTensorSpec)
+    if self.placements != target.placements:
+        # Self and target must match in placements, which should be shard along
+        # batch dimension in data parallell use cases. Force redistribute.
+
+        # need to create a new self instead return (target, target) as target
+        # and self might not match in shape.
+        new_self = DTensorSpec(
+            mesh=self.mesh,
+            placements=target.placements,
+            tensor_meta=self.tensor_meta,
+        )
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=(new_self, target) + op_schema.args_schema[2:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                    is_inplace=op_schema.is_inplace,
+                    is_out_variant=op_schema.is_out_variant,
+                )
+            ],
+        )
+    else:
+        return OutputSharding(
+            output_spec=(
+                # by default, nll_loss_forward conducts a reduction and returns
+                # a scalar tensor, and hence the _Partial placements.
+                DTensorSpec(mesh=self.mesh, placements=[_Partial()]),
+                # the 2nd output total_weight is always a scalar tensor
+                DTensorSpec(mesh=self.mesh, placements=[Replicate()]),
+            )
+        )
+
+
+@register_prop_rule(aten.nll_loss_backward.default)  # pyre-ignore
+def _prop_nll_loss_backward(op_schema: OpSchema) -> OutputSharding:
+    grad_output, self = op_schema.args_schema[:2]
+    assert isinstance(grad_output, DTensorSpec)
+    assert isinstance(self, DTensorSpec)
+    return OutputSharding(output_spec=self)
+
+
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     input, normalized_shape, weight, bias, eps = op_schema.args_schema
@@ -355,12 +256,10 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
     ) = op_schema.args_schema
     assert isinstance(grad, DTensorSpec)
     assert isinstance(weight, DTensorSpec)
-    if bias:
-        assert isinstance(bias, DTensorSpec)
+    assert isinstance(bias, DTensorSpec)
     assert isinstance(grad_input_mask, (list, tuple))
     assert all(isinstance(s, Replicate) for s in weight.placements)
-    if bias:
-        assert all(isinstance(s, Replicate) for s in bias.placements)
+    assert all(isinstance(s, Replicate) for s in bias.placements)
     # ensure sharding on dim 0, which will trigger the "Partial" output on weight and bias grads
     assert any(
         isinstance(s, Shard) and s.dim == 0 for s in grad.placements
