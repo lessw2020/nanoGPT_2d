@@ -270,7 +270,7 @@ model.to(_device)
 
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
+# scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 
 # optimizer
 optimizer = model.configure_optimizers(
@@ -288,7 +288,8 @@ if dynamo_compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-if ddp:
+pure_ddp = False
+if pure_ddp:
     model = DDP(
         model,
         device_ids=[ddp_local_rank],
@@ -368,8 +369,8 @@ def zero_print(msg):
         print(f"{msg}")
 
 
-# @compile()
-def train_loop(model, opt, inp):
+@compile()
+def train_loop(model, opt, inp, profiler):
     # for i in range(train_iters):
     zero_print(f"compile train loop, ")
     X, Y = inp
@@ -381,13 +382,40 @@ def train_loop(model, opt, inp):
     zero_print(f"tl after backward")
     opt.step()
     zero_print(f"tl after step")
+
+    profiler.step()
+    zero_print(f"profiler step")
+
     opt.zero_grad(set_to_none=True)
     zero_print(f"tl zero grads")
     return loss
 
 
 model.train()
-for i in range(4):
+
+for i in range(train_iters):
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(wait=1, warmup=2, active=3, repeat=1),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler("trace_compile"),
+        profile_memory=True,
+        with_stack=True,
+        record_shapes=True,
+    ) as torch_profiler:
+        t0 = time.perf_counter()
+        loss = train_loop(model, optimizer, inp=(X, Y), profiler=torch_profiler)
+        t1 = time.perf_counter()
+
+        zero_print(f"\nTraining step: {i+1}")
+        zero_print(f"Training loss: {loss}\n")
+        zero_print(f"Training time: {t1-t0:.4f}")
+        X, Y = get_batch("train")
+
+assert False, "auto stop"
+for i in range(train_iters):
     t0 = time.perf_counter()
     loss = train_loop(model, optimizer, inp=(X, Y))
     t1 = time.perf_counter()
