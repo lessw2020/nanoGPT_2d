@@ -109,7 +109,7 @@ class CausalSelfAttention(nn.Module):
             # print(f"model 106...")
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
-            print(f"model 111, finishing attention head")
+            print(f"finishing attention head")
             y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = (
             y.transpose(1, 2).contiguous().view(B, T, C)

@@ -288,11 +288,11 @@ if dynamo_compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-# if ddp:
-# model = DDP(
-#    model,
-#   device_ids=[ddp_local_rank],
-# )  #  find_unused_parameters=False)
+if ddp:
+    model = DDP(
+        model,
+        device_ids=[ddp_local_rank],
+    )  #  find_unused_parameters=False)
 
 # _mesh = DeviceMesh(_device, torch.arange(world_size))
 # set_global_device_mesh(_mesh)
@@ -368,23 +368,33 @@ def zero_print(msg):
         print(f"{msg}")
 
 
-@compile()
+# @compile()
 def train_loop(model, opt, inp):
     # for i in range(train_iters):
     zero_print(f"compile train loop, ")
     X, Y = inp
+
     logits, loss = model(X, Y)
+
+    zero_print(f"training loss = {loss=}")
     loss.backward()
     zero_print(f"tl after backward")
     opt.step()
     zero_print(f"tl after step")
-    opt.zero_grad()  # set_to_none=True)
+    opt.zero_grad(set_to_none=True)
     zero_print(f"tl zero grads")
+    return loss
 
 
 model.train()
-for i in range(2):
-    train_loop(model, optimizer, inp=(X, Y))
+for i in range(4):
+    t0 = time.perf_counter()
+    loss = train_loop(model, optimizer, inp=(X, Y))
+    t1 = time.perf_counter()
+
+    zero_print(f"\nTraining step: {i+1}")
+    zero_print(f"Training loss: {loss}\n")
+    zero_print(f"Training time: {t1-t0:.4f}")
     X, Y = get_batch("train")
 
 assert False, f" auto stop"

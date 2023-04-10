@@ -14,16 +14,16 @@ wandb_project = "shakespeare-char"
 wandb_run_name = "mini-gpt"
 
 dataset = "shakespeare_char"
-batch_size = 9
+batch_size = 24
 block_size = 256  # context of up to 256 previous characters
 
 # baby GPT model :)
-n_layer = 2
-n_head = 2
-n_embd = 192  # 768 // 2
+n_layer = 6
+n_head = 6
+n_embd = 384  #  // 2  # 768 // 2
 dropout = 0.0
 
-learning_rate = 1e-3  # with baby networks can afford to go a bit higher
+learning_rate = 4e-6  # with baby networks can afford to go a bit higher
 max_iters = 20
 lr_decay_iters = 5000  # make equal to max_iters usually
 min_lr = 1e-4  # learning_rate / 10 usually
