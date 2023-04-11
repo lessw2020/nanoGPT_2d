@@ -109,7 +109,7 @@ class CausalSelfAttention(nn.Module):
             # print(f"model 106...")
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
-            print(f"finishing attention head")
+            # print(f"finishing attention head")
             y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = (
             y.transpose(1, 2).contiguous().view(B, T, C)
@@ -232,7 +232,7 @@ class GPT(nn.Module):
         pos_emb = self.transformer.wpe(
             pos
         )  # position embeddings of shape (1, t, n_embd)
-        x = self.transformer.drop(tok_emb)  #  + pos_emb)
+        x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -240,8 +240,8 @@ class GPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
-            print(f"logits shape {logits.shape}")
-            print(f"targets {targets.shape=}")
+            # print(f"logits shape {logits.shape}")
+            # print(f"targets {targets.shape=}")
             # loss = logits.sum()
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
             #    logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
@@ -340,8 +340,7 @@ class GPT(nn.Module):
         return model
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
-        """
-        This long function is unfortunately doing something very simple and is being very defensive:
+        """This long function is unfortunately doing something very simple and is being very defensive:
         We are separating out all parameters of the model into two buckets: those that will experience
         weight decay for regularization and those that won't (biases, and layernorm/embedding weights).
         We are then returning the PyTorch optimizer object.
@@ -400,6 +399,7 @@ class GPT(nn.Module):
                 "weight_decay": 0.0,
             },
         ]
+
         # new PyTorch nightly has a new 'fused' option for AdamW that is much faster
         use_fused = (device_type == "cuda") and (
             "fused" in inspect.signature(torch.optim.Adam).parameters

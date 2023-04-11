@@ -29,6 +29,10 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
 
+import os
+
+os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+print(f"torch dist environment = {os.environ['TORCH_DISTRIBUTED_DEBUG']}")
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
@@ -55,7 +59,7 @@ n_embd = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = True  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 6e-4  # max learning rate
+learning_rate = 9e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
@@ -103,8 +107,8 @@ else:
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(1337 + seed_offset)
-torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+# torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+# torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {
@@ -230,13 +234,15 @@ if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
 
 # compile the model
-if compile:
+_dynamo = False
+if _dynamo:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-if ddp:
+_eager_ddp = True
+if _eager_ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 
 
@@ -272,12 +278,59 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 
-# logging
-if wandb_log and master_process:
-    import wandb
+# training loop
+X, Y = get_batch("train")  # fetch the very first batch
+t0 = time.time()
+local_iter_num = 0  # number of iterations in the lifetime of this process
+# raw_model = model.module if ddp else model  # unwrap DDP container if needed
+running_mfu = -1.0
+lr = 0.001
 
-    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+train_iters: int = 20
+my_rank = torch.distributed.get_rank()
 
+
+def zero_print(msg):
+    if my_rank == 0:
+        print(f"{msg}")
+
+
+if _eager_ddp:
+    zero_print(f" Training with Eager DDP")
+
+
+# @compile()
+def train_loop(model, opt, inp):
+    # for i in range(train_iters):
+    zero_print(f"compile train loop, ")
+    X, Y = inp
+
+    logits, loss = model(X, Y)
+
+    loss.backward()
+    opt.step()
+
+    opt.zero_grad(set_to_none=True)
+
+    return loss
+
+
+model.train()
+
+for i in range(train_iters):
+    t0 = time.perf_counter()
+    loss = train_loop(model, optimizer, inp=(X, Y))
+    t1 = time.perf_counter()
+
+    zero_print(f"\nTraining step: {i+1}")
+    zero_print(f"Training loss: {loss}\n")
+    zero_print(f"Training time: {t1-t0:.4f}")
+    X, Y = get_batch("train")
+
+assert False, "auto stop"
+
+
+max_iters = 20
 # training loop
 X, Y = get_batch("train")  # fetch the very first batch
 t0 = time.time()
@@ -296,19 +349,10 @@ while True:
         print(
             f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
         )
-        if wandb_log:
-            wandb.log(
-                {
-                    "iter": iter_num,
-                    "train/loss": losses["train"],
-                    "val/loss": losses["val"],
-                    "lr": lr,
-                    "mfu": running_mfu * 100,  # convert to percentage
-                }
-            )
+
         if losses["val"] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses["val"]
-            if iter_num > 0:
+            if iter_num > 200:
                 checkpoint = {
                     "model": raw_model.state_dict(),
                     "optimizer": optimizer.state_dict(),

@@ -91,7 +91,7 @@ n_embd = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 6e-4  # max learning rate
+learning_rate = 9e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
@@ -277,6 +277,14 @@ optimizer = model.configure_optimizers(
     weight_decay, learning_rate, (beta1, beta2), device_type
 )
 
+# param_dict = {pn: p for pn, p in model.named_parameters()}
+# use_fused = True
+# print(f"using fused AdamW: {use_fused}")
+# extra_args = dict(fused=True) if use_fused else dict()
+# optimizer = torch.optim.Adam(
+#    param_dict, lr=learning_rate, betas=(beta1, beta2), **extra_args
+# )
+
 if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
 
@@ -288,8 +296,8 @@ if dynamo_compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-pure_ddp = False
-if pure_ddp:
+_pure_ddp = True
+if _pure_ddp:
     model = DDP(
         model,
         device_ids=[ddp_local_rank],
@@ -346,12 +354,6 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 
-# logging
-if wandb_log and master_process:
-    import wandb
-
-    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
-
 # training loop
 X, Y = get_batch("train")  # fetch the very first batch
 t0 = time.time()
@@ -360,7 +362,7 @@ local_iter_num = 0  # number of iterations in the lifetime of this process
 running_mfu = -1.0
 lr = 0.001
 
-train_iters: int = 10
+train_iters: int = 20
 my_rank = dist.get_rank()
 
 
@@ -369,8 +371,12 @@ def zero_print(msg):
         print(f"{msg}")
 
 
-@compile()
-def train_loop(model, opt, inp, profiler):
+if _pure_ddp:
+    zero_print(f" Training with Eager DDP")
+
+
+# @compile()
+def train_loop(model, opt, inp):
     # for i in range(train_iters):
     zero_print(f"compile train loop, ")
     X, Y = inp
@@ -383,7 +389,6 @@ def train_loop(model, opt, inp, profiler):
     opt.step()
     zero_print(f"tl after step")
 
-    profiler.step()
     zero_print(f"profiler step")
 
     opt.zero_grad(set_to_none=True)
@@ -394,7 +399,18 @@ def train_loop(model, opt, inp, profiler):
 model.train()
 
 for i in range(train_iters):
-    with torch.profiler.profile(
+    t0 = time.perf_counter()
+    loss = train_loop(model, optimizer, inp=(X, Y))
+    t1 = time.perf_counter()
+
+    zero_print(f"\nTraining step: {i+1}")
+    zero_print(f"Training loss: {loss}\n")
+    zero_print(f"Training time: {t1-t0:.4f}")
+    X, Y = get_batch("train")
+
+assert False, "auto stop"
+
+"""    with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
@@ -405,16 +421,7 @@ for i in range(train_iters):
         with_stack=True,
         record_shapes=True,
     ) as torch_profiler:
-        t0 = time.perf_counter()
-        loss = train_loop(model, optimizer, inp=(X, Y), profiler=torch_profiler)
-        t1 = time.perf_counter()
-
-        zero_print(f"\nTraining step: {i+1}")
-        zero_print(f"Training loss: {loss}\n")
-        zero_print(f"Training time: {t1-t0:.4f}")
-        X, Y = get_batch("train")
-
-assert False, "auto stop"
+"""
 for i in range(train_iters):
     t0 = time.perf_counter()
     loss = train_loop(model, optimizer, inp=(X, Y))
