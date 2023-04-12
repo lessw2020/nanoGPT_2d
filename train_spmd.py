@@ -142,7 +142,9 @@ else:
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
-torch.manual_seed(1337 + seed_offset)
+
+torch.manual_seed(2023 + seed_offset)
+torch.cuda.manual_seed(2023 + seed_offset)
 # torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
 # torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 device_type = (
@@ -296,7 +298,7 @@ if dynamo_compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-_pure_ddp = True
+_pure_ddp = False
 if _pure_ddp:
     model = DDP(
         model,
@@ -362,7 +364,7 @@ local_iter_num = 0  # number of iterations in the lifetime of this process
 running_mfu = -1.0
 lr = 0.001
 
-train_iters: int = 20
+train_iters: int = 5
 my_rank = dist.get_rank()
 
 
@@ -375,28 +377,83 @@ if _pure_ddp:
     zero_print(f" Training with Eager DDP")
 
 
-# @compile()
+@compile()
 def train_loop(model, opt, inp):
     # for i in range(train_iters):
-    zero_print(f"compile train loop, ")
+    # zero_print(f"compile train loop, ")
     X, Y = inp
 
     logits, loss = model(X, Y)
 
-    zero_print(f"training loss = {loss=}")
+    # zero_print(f"training loss = {loss=}")
     loss.backward()
-    zero_print(f"tl after backward")
+    # zero_print(f"tl after backward")
     opt.step()
-    zero_print(f"tl after step")
-
-    zero_print(f"profiler step")
+    # zero_print(f"tl after step")
 
     opt.zero_grad(set_to_none=True)
-    zero_print(f"tl zero grads")
+    # zero_print(f"tl zero grads")
     return loss
 
 
 model.train()
+
+
+def trace_handler(prof):
+    print(f"**** Entered trace handler **********")
+    # print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+    res = prof.export_chrome_trace("test_trace_" + str(prof.step_num) + ".json")
+    print(res)
+
+
+if _pure_ddp:
+    model.train()
+    train_iters = 11
+    X, Y = get_batch("train")
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=0),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler("trace_compile_ddp"),
+        profile_memory=True,
+        with_stack=False,
+        record_shapes=False,
+    ) as torch_profiler:
+        for i in range(train_iters):
+            t0 = time.perf_counter()
+            loss = train_loop(model, optimizer, inp=(X, Y))
+            torch_profiler.step()
+            t1 = time.perf_counter()
+
+            zero_print(f"\nTraining step: {i+1}")
+            zero_print(f"Training loss: {loss}\n")
+            zero_print(f"Training time: {t1-t0:.4f}")
+            X, Y = get_batch("train")
+
+    torch.distributed.barrier()
+
+if not _pure_ddp:
+    for i in range(train_iters):
+        t0 = time.perf_counter()
+        loss = train_loop(model, optimizer, inp=(X, Y))
+        torch_profiler.step()
+        t1 = time.perf_counter()
+
+        zero_print(f"\nTraining step: {i+1}")
+        zero_print(f"Training loss: {loss}\n")
+        zero_print(f"Training time: {t1-t0:.4f}")
+        X, Y = get_batch("train")
+
+if ddp:
+    destroy_process_group()
+assert False, "good stop"
+"""
+
+#
+
 
 for i in range(train_iters):
     t0 = time.perf_counter()
@@ -404,13 +461,13 @@ for i in range(train_iters):
     t1 = time.perf_counter()
 
     zero_print(f"\nTraining step: {i+1}")
-    zero_print(f"Training loss: {loss}\n")
+    zero_print(f"Training loss: {loss}")
     zero_print(f"Training time: {t1-t0:.4f}")
     X, Y = get_batch("train")
 
 assert False, "auto stop"
 
-"""    with torch.profiler.profile(
+    with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
@@ -421,8 +478,8 @@ assert False, "auto stop"
         with_stack=True,
         record_shapes=True,
     ) as torch_profiler:
-"""
-for i in range(train_iters):
+
+    for i in range(train_iters):
     t0 = time.perf_counter()
     loss = train_loop(model, optimizer, inp=(X, Y))
     t1 = time.perf_counter()
@@ -516,6 +573,4 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
-
-if ddp:
-    destroy_process_group()
+"""

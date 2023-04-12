@@ -160,6 +160,70 @@ class GPTConfig:
     bias: bool = True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 
+@dataclass
+class GPT2Config:
+    vocab_size: int = 50304
+    block_size: int = 1024
+    num_layers: int = 12
+    num_attn_heads: int = 12
+    num_embeddings: int = 768
+    dropout: float = 0.0
+    bias: bool = False
+
+
+@dataclass
+class ShakespeareConfig:
+    dataset = "shakespeare_char"
+    batch_size = 24
+    block_size = 256  # context of up to 256 previous characters
+    vocab_size: int = 65
+    block_size: int = 256
+    num_layers: int = 6
+    num_attn_heads: int = 6
+    num_embeddings: int = 384
+    dropout: float = 0.0
+    bias: bool = False
+
+
+class GPT2(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        assert config.vocab_size is not None
+        assert config.block_size is not None
+        self.config = config
+
+        self.transformer = nn.ModuleDict(
+            embeddings=nn.Embedding(self.config.vocab_size, self.config.num_embeddings),
+            pos_embeddings=nn.Embedding(
+                self.config.block_size, self.config.num_embeddings
+            ),
+            dropout=nn.Dropout(self.config.dropout),
+            body=nn.ModuleList(
+                [Block(self.config) for _ in range(self.config.num_layers)]
+            ),
+            layernorm=LayerNorm(self.config.num_embeddings, bias=self.config.bias),
+        )
+        self.head = nn.Linear(
+            self.config.num_embeddings,
+            self.config.vocab_size,
+            bias=self.config.head_bias,
+        )
+
+        self.transformer.embeddings.weight = self.head.weight
+
+        # init
+        self.apply(self._init_weights)
+
+        # apply special scaling
+        for pn, p in self.named_parameters():
+            if pn.endswith("c_proj.weight"):
+                torch.nn.init.normal_(
+                    p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.num_layers)
+                )
+
+        # show param count
+
+
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
