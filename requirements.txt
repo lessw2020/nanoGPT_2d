@@ -3,3 +3,5 @@ transformers
 datasets
 numpy
 tqdm
+expecttest
+hypothesis

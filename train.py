@@ -241,7 +241,7 @@ if _dynamo:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-_eager_ddp = True
+_eager_ddp = False
 if _eager_ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 
@@ -299,7 +299,7 @@ if _eager_ddp:
     zero_print(f" Training with Eager DDP")
 
 
-# @compile()
+@compile()
 def train_loop(model, opt, inp):
     # for i in range(train_iters):
     zero_print(f"compile train loop, ")

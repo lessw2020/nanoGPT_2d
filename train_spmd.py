@@ -439,7 +439,7 @@ if not _pure_ddp:
     for i in range(train_iters):
         t0 = time.perf_counter()
         loss = train_loop(model, optimizer, inp=(X, Y))
-        torch_profiler.step()
+        #torch_profiler.step()
         t1 = time.perf_counter()
 
         zero_print(f"\nTraining step: {i+1}")
@@ -448,8 +448,9 @@ if not _pure_ddp:
         X, Y = get_batch("train")
 
 if ddp:
+    print(f"rank {torch.distributed.get_rank()} exiting...\n")
     destroy_process_group()
-assert False, "good stop"
+#assert False, "good stop"
 """
 
 #
