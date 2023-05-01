@@ -26,6 +26,23 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    CPUOffload,
+    MixedPrecision,
+    BackwardPrefetch,
+    ShardingStrategy,
+    FullStateDictConfig,
+    StateDictType,
+)
+
+
+from torch.distributed.fsdp.wrap import (
+    transformer_auto_wrap_policy,
+    enable_wrap,
+    wrap,
+)
+
 
 from model import GPTConfig, GPT
 
@@ -112,11 +129,7 @@ ptdtype = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
 }[dtype]
-ctx = (
-    nullcontext()
-    if device_type == "cpu"
-    else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
-)
+
 
 # poor man's data loader
 data_dir = os.path.join("data", dataset)
@@ -220,7 +233,7 @@ if block_size < model.config.block_size:
 model.to(device)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
+#scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 
 # optimizer
 optimizer = model.configure_optimizers(
@@ -238,8 +251,22 @@ if dynamo:
 
 # wrap model into DDP container
 if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
+    #model = DDP(model, device_ids=[ddp_local_rank])
+    model = FSDP(
+        model,
+        #auto_wrap_policy=wrapping_policy,
+        #mixed_precision=mp_policy,
+        #sharding_strategy=model_sharding_strategy,
+        #backward_prefetch=backward_policy,
+        device_id=torch.cuda.current_device(),  # streaming init
+        #limit_all_gathers=cfg.use_rate_limiter,
+        use_orig_params=True,
+    )
 
+# optimizer
+optimizer = model.configure_optimizers(
+    weight_decay, learning_rate, (beta1, beta2), device_type
+)
 
 def zero_print(msg):
     if torch.distributed.get_rank() == 0:
@@ -283,7 +310,18 @@ model.train()
 train_iters = 11
 X, Y = get_batch("train")
 
-with torch.profiler.profile(
+
+for i in range(train_iters):
+        t0 = time.perf_counter()
+        loss = train_loop(model, optimizer, inp=(X, Y))
+        t1 = time.perf_counter()
+
+        zero_print(f"\nTraining step: {i+1}")
+        zero_print(f"Training loss: {loss}\n")
+        zero_print(f"Training time: {t1-t0:.4f}")
+        X, Y = get_batch("train")
+
+'''with torch.profiler.profile(
     activities=[
         torch.profiler.ProfilerActivity.CPU,
         torch.profiler.ProfilerActivity.CUDA,
@@ -305,7 +343,7 @@ with torch.profiler.profile(
         zero_print(f"Training time: {t1-t0:.4f}")
         X, Y = get_batch("train")
 
-
+'''
 torch.distributed.barrier()
 
 
