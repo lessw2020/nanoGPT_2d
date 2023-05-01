@@ -43,6 +43,8 @@ from torch.distributed._spmd.api import (
     compile,
 )
 from torch.distributed._spmd.comm_tensor import CommTensor
+from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
+
 from torch.distributed._tensor import DeviceMesh, Replicate
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
@@ -376,8 +378,104 @@ def zero_print(msg):
 if _pure_ddp:
     zero_print(f" Training with Eager DDP")
 
+###
+### Ugly patch start
+###
+from typing import Callable
+import operator
 
-@compile()
+from torch import fx
+import torch
+from torch.distributed._spmd.graph_optimization import (
+    comm_fusion_with_concat,
+    enable_graph_optimization_dump,
+    remove_copy_from_optimizer,
+    schedule_comm_wait,
+)
+from torch.distributed._spmd.graph_utils import dump_graphs_to_files
+from torch.distributed._spmd.iter_graph_module import IterGraphModule
+
+def _defunctionalize_fused_adam(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    stack = []
+    for node in gm.graph.nodes:
+        if node.target == torch.ops.aten._fused_adam.default:
+            node.target = torch.ops.aten._fused_adam_.default
+            stack.extend(node.users)
+
+    while len(stack) != 0:
+        node = stack.pop()
+        if node.target == operator.getitem:
+            if len(node.users) == 0:
+                gm.graph.erase_node(node)
+            else:
+                stack.append(node)
+                stack.extend(node.users)
+        elif node.target == torch.ops.aten.copy_.default:
+            node.replace_all_uses_with(node.args[0])
+            gm.graph.erase_node(node)
+        else:
+            raise AssertionError(
+                "Expect descendants of _fused_adam to be either getitem or copy_. "
+                f"Got {node.format_node()}."
+            )
+
+    gm.graph.lint()
+    gm.recompile()
+    return gm
+
+class GraphModuleTransformation:
+    def __init__(
+        self,
+        *,
+        enable_graph_optimization: bool = False,
+        enable_inductor: bool = False,
+        dump_graphs: bool = False,
+    ) -> None:
+        self.enable_graph_optimization = enable_graph_optimization
+        self.enable_inductor = enable_inductor
+        self.dump_graphs = dump_graphs
+
+    def __call__(self, gm: fx.GraphModule) -> Callable:
+        if self.dump_graphs:
+            graph_folder = dump_graphs_to_files(
+                {"before_transformation_gm": gm.print_readable(False)}
+            )
+            enable_graph_optimization_dump(graph_folder)
+
+        iter_gm = IterGraphModule(gm, enable_inductor=self.enable_inductor)
+        if self.enable_graph_optimization:
+            comm_fusion_with_concat(iter_gm, 10)
+            schedule_comm_wait(iter_gm)
+            remove_copy_from_optimizer(iter_gm)
+        # Must be called after we are not going to move the graphs
+        iter_gm.freeze_cross_iter_movement()
+        _defunctionalize_fused_adam(iter_gm)
+        iter_gm.finalize_setup()
+
+        if self.dump_graphs:
+            dump_graphs_to_files(
+                {
+                    "iter_graph_setup_gm": iter_gm.setup_gm.print_readable(False),
+                    "iter_graph_main_gm": iter_gm.main_gm.print_readable(False),
+                    "iter_graph_cleanup_gm": iter_gm.cleanup_gm.print_readable(False),
+                },
+                graph_folder,
+            )
+
+        return iter_gm
+
+###
+### Ugly patch end
+###
+
+
+@compile(
+    gm_transformation=GraphModuleTransformation(
+        enable_graph_optimization=True,
+        enable_inductor=True,
+        dump_graphs=True,
+    )
+)
 def train_loop(model, opt, inp):
     # for i in range(train_iters):
     # zero_print(f"compile train loop, ")
@@ -408,7 +506,8 @@ def trace_handler(prof):
 
 if _pure_ddp:
     model.train()
-    train_iters = 11
+    train_iters = 51
+    accum = 0
     X, Y = get_batch("train")
 
     with torch.profiler.profile(
@@ -416,7 +515,7 @@ if _pure_ddp:
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
         ],
-        schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=0),
+        schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
         on_trace_ready=torch.profiler.tensorboard_trace_handler("trace_compile_ddp"),
         profile_memory=True,
         with_stack=False,
@@ -432,20 +531,42 @@ if _pure_ddp:
             zero_print(f"Training loss: {loss}\n")
             zero_print(f"Training time: {t1-t0:.4f}")
             X, Y = get_batch("train")
+            if i > 5 and i < train_iters - 1:
+                accum += t1 - t0
 
+    zero_print(f"Avg training time: {accum / (train_iters - 7):.4f}")
     torch.distributed.barrier()
 
 if not _pure_ddp:
-    for i in range(train_iters):
-        t0 = time.perf_counter()
-        loss = train_loop(model, optimizer, inp=(X, Y))
-        torch_profiler.step()
-        t1 = time.perf_counter()
+    train_iters = 51
+    accum = 0.0
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler("trace_compile_spmd"),
+        profile_memory=True,
+        with_stack=False,
+        record_shapes=False,
+    ) as torch_profiler:
+        for i in range(train_iters):
+            t0 = time.perf_counter()
+            loss = train_loop(model, optimizer, inp=(X, Y))
+            torch_profiler.step()
+            t1 = time.perf_counter()
+            if i > 5 and i < train_iters - 1:
+                accum += t1 - t0
 
-        zero_print(f"\nTraining step: {i+1}")
-        zero_print(f"Training loss: {loss}\n")
-        zero_print(f"Training time: {t1-t0:.4f}")
-        X, Y = get_batch("train")
+            zero_print(f"\nTraining step: {i+1}")
+            zero_print(f"Training loss: {loss}\n")
+            zero_print(f"Training time: {t1-t0:.4f}")
+            X, Y = get_batch("train")
+
+    zero_print(f"Avg training time: {accum / (train_iters - 7):.4f}")
+
+
 
 if ddp:
     destroy_process_group()
