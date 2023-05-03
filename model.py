@@ -92,7 +92,7 @@ class CausalSelfAttention(nn.Module):
         
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-        
+
         tp_size = self.mesh.mesh.size(0)
         assert self.n_head % tp_size == 0, "num of heads are not divisible by tp size." 
 
@@ -423,7 +423,7 @@ class GPT(nn.Module):
         flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
         # express our flops throughput as ratio of A100 bfloat16 peak flops
         flops_achieved = flops_per_iter * (1.0 / dt)  # per second
-        flops_promised = 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
+        flops_promised = 125e12 # 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
         mfu = flops_achieved / flops_promised
         return mfu
 

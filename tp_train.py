@@ -36,6 +36,8 @@ import torch.distributed as dist
 
 import inspect
 
+import perf 
+
 TP_AVAILABLE = False
 try:
     from torch.distributed._tensor import (
@@ -213,6 +215,12 @@ if os.path.exists(meta_path):
 # model init
 
 
+if _rank == 0:
+    memmax = perf.Memory_Maximizer()
+
+
+
+
 model_args = dict(
     n_layer=n_layer,
     n_head=n_head,
@@ -365,12 +373,20 @@ def get_lr(it):
 
 # training loop
 X, Y = get_batch("train", fsdp_pg)  # fetch the very first batch
-t0 = time.time()
+
 local_iter_num = 0  # number of iterations in the lifetime of this process
 running_mfu = -1.0
 eval_interval = 5
 
-while local_iter_num < 10:
+# memory and timing tracking
+if _rank == 0:
+    memmax.start()  # start will reset all tracking points
+_accumulate = 0.0
+_count = 0
+
+t0 = time.perf_counter()
+
+while local_iter_num < 100:
     # determine and set the learning rate for this iteration
     #lr = get_lr(iter_num) if decay_lr else learning_rate
     #for param_group in optimizer.param_groups:
@@ -429,12 +445,14 @@ while local_iter_num < 10:
     #    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
     # step the optimizer and scaler if training in fp16
     optimizer.step()
+    if _rank==0:
+        memmax.update()
     
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
 
     # timing and logging
-    t1 = time.time()
+    t1 = time.perf_counter()
     dt = t1 - t0
     t0 = t1
     if iter_num % log_interval == 0 and master_process:
@@ -444,15 +462,24 @@ while local_iter_num < 10:
                 batch_size * world_size * gradient_accumulation_steps, dt
             )
             running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
+            _accumulate += dt*1000
+            _count+=1
         print(
             f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%"
         )
+        
+
     iter_num += 1
     local_iter_num += 1
+    
 
     # termination conditions
     if iter_num > max_iters:
         break
 
+dist.barrier()
+if _rank == 0:
+    memmax.stop()
+    print(f"Avg Time per iter: {(_accumulate / _count):.2f} ms, average MFU: {running_mfu*100:.2f}%")
 if _tp:
     destroy_process_group()
