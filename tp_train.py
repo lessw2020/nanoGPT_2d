@@ -117,11 +117,14 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 # various inits, derived attributes, I/O setup
 
 # Init TP
-_tp = int(os.environ.get("RANK", -1)) != -1  # verify distributed run
+_use_tp: bool = False
 
-assert (
-    _tp and TP_AVAILABLE
-), "this config assumes setup for Tensor Parallel - distributed not ready here."
+if _use_tp:
+    _tp = int(os.environ.get("RANK", -1)) != -1  # verify distributed run
+
+    assert (
+        _tp and TP_AVAILABLE
+    ), "this config assumes setup for Tensor Parallel - distributed not ready here."
 
 
 init_process_group(backend=backend)
@@ -140,16 +143,18 @@ def rank_print(x):
     if _rank == 0:
         print(x)
 
+# update if this is tp or ddp:
+rank_print(f"Using tp?  {_use_tp}")
+if _use_tp:
+    rank_print(f"TP is available = {TP_AVAILABLE}\n")
+    model_parallel_size = 2
 
-rank_print(f"TP is available = {TP_AVAILABLE}\n")
-model_parallel_size = 2
-
-# 2-D mesh is [dp, tp]
-twod_mesh = DeviceMesh(
-    device_type="cuda",
-    mesh=torch.arange(0, world_size).view(-1,  model_parallel_size),
-)
-rank_print(f"{twod_mesh=}")
+    # 2-D mesh is [dp, tp]
+    twod_mesh = DeviceMesh(
+        device_type="cuda",
+        mesh=torch.arange(0, world_size).view(-1,  model_parallel_size),
+    )
+    rank_print(f"{twod_mesh=}")
 
 
 if master_process:
@@ -177,7 +182,8 @@ val_data = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint16, mode="r
 def get_batch(split, fsdp_pg):
     data = train_data if split == "train" else val_data
     # Training data needs to be same across TP ranks.
-    torch.manual_seed(dist.get_rank(fsdp_pg))
+    if fsdp_pg:
+        torch.manual_seed(dist.get_rank(fsdp_pg))
 
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack(
@@ -240,13 +246,20 @@ if meta_vocab_size is None:
         "defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)"
     )
 model_args["vocab_size"] = meta_vocab_size if meta_vocab_size is not None else 50304
-tp_device_mesh = _create_1d_device_mesh(twod_mesh, -1)
 
-gptconf = GPTConfig(**model_args)
-model = GPT(tp_device_mesh, gptconf).cuda(_rank)
+if _use_tp:
+    tp_device_mesh = _create_1d_device_mesh(twod_mesh, -1)
+
+    gptconf = GPTConfig(**model_args)
+    model = GPT(tp_device_mesh, gptconf).cuda(_rank)
+else:
+    gptconf = GPTConfig(**model_args)
+    mesh = None
+    model = GPT(mesh, gptconf).cuda(_rank)
 
 
-rank_print(f"======== model ===============\n {model=}\n ==================\n")
+
+#rank_print(f"======== model ===============\n {model=}\n ==================\n")
 
 
 """def parallelize_gpt(
@@ -274,29 +287,32 @@ import torch.nn as nn
 rank = dist.get_rank()
 # fqn = get_parallelization_fqn(model)
 
-for i in range(6):
-    block = model.get_submodule(f"transformer.h.{i}")
-    parallelized_block = parallelize_module(
-        module=block,
-        device_mesh=twod_mesh,
-        parallelize_plan={
-            "attn.c_attn": ColwiseParallelForAttn(),
-            "attn.c_proj": RowwiseParallelForAttn(),
-            "mlp": PairwiseParallel()
-        },
-        tp_mesh_dim=1,
-    )
-    block = parallelized_block
+if _use_tp:
+    #print(f"{gptconf.n_layer=}")
+    #assert False, "good"
+    for i in range(gptconf.n_layer):
+        block = model.get_submodule(f"transformer.h.{i}")
+        parallelized_block = parallelize_module(
+            module=block,
+            device_mesh=twod_mesh,
+            parallelize_plan={
+                "attn.c_attn": ColwiseParallelForAttn(),
+                "attn.c_proj": RowwiseParallelForAttn(),
+                "mlp": PairwiseParallel()
+            },
+            tp_mesh_dim=1,
+        )
+        block = parallelized_block
 
 
 
-fsdp_pg = twod_mesh.get_dim_groups()[0]
+    fsdp_pg = twod_mesh.get_dim_groups()[0]
 
 
-# todo - add back main code later for resume
+    # todo - add back main code later for resume
 
-#model.to(device)
-model = FSDP(model, device_id=device, process_group=fsdp_pg)
+    #model.to(device)
+    model = FSDP(model, device_id=device, process_group=fsdp_pg)
 
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
@@ -324,11 +340,12 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, **extra_args
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
-
-# wrap model into DDP container
-if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
 """
+# wrap model into DDP container
+if not _use_tp:
+    model = DDP(model, device_ids=[_local_rank])
+    fsdp_pg = None
+
 
 # TP and FSDP init
 # assert 1, "stopping here"
@@ -386,7 +403,7 @@ _count = 0
 
 t0 = time.perf_counter()
 
-while local_iter_num < 100:
+while local_iter_num < 51:
     # determine and set the learning rate for this iteration
     #lr = get_lr(iter_num) if decay_lr else learning_rate
     #for param_group in optimizer.param_groups:
@@ -458,9 +475,11 @@ while local_iter_num < 100:
     if iter_num % log_interval == 0 and master_process:
         lossf = loss.item()  # loss as float. note: this is a CPU-GPU sync point
         if local_iter_num >= 5:  # let the training loop settle a bit
-            mfu = model.estimate_mfu(
+            core_model = model.module if not _use_tp else model
+            mfu = core_model.estimate_mfu(
                 batch_size * world_size * gradient_accumulation_steps, dt
-            )
+                )
+            
             running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             _accumulate += dt*1000
             _count+=1
@@ -481,5 +500,6 @@ dist.barrier()
 if _rank == 0:
     memmax.stop()
     print(f"Avg Time per iter: {(_accumulate / _count):.2f} ms, average MFU: {running_mfu*100:.2f}%")
-if _tp:
-    destroy_process_group()
+    print(f"\nThis was run with Tensor Parallel?  {_use_tp}")
+
+destroy_process_group()

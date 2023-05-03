@@ -93,13 +93,22 @@ class CausalSelfAttention(nn.Module):
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
-        tp_size = self.mesh.mesh.size(0)
-        assert self.n_head % tp_size == 0, "num of heads are not divisible by tp size." 
+        if self.mesh:
+            tp_size = self.mesh.mesh.size(0)
+            
+            assert self.n_head % tp_size == 0, "num of heads are not divisible by tp size." 
+            
+            q, k ,v  = self.c_attn(x).split(self.n_embd // tp_size, dim=2)
+            k = k.view(B, T, self.n_head // tp_size, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            q = q.view(B, T, self.n_head // tp_size, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            v = v.view(B, T, self.n_head // tp_size, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        else:
+            q, k ,v  = self.c_attn(x).split(self.n_embd, dim=2)
+            k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
-        q, k ,v  = self.c_attn(x).split(self.n_embd // tp_size, dim=2)
-        k = k.view(B, T, self.n_head // tp_size, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head // tp_size, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head // tp_size, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        
 
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
@@ -113,7 +122,11 @@ class CausalSelfAttention(nn.Module):
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
 
 
-        y = y.transpose(1, 2).contiguous().view(B, T, C // tp_size) # re-assemble all head outputs side by side
+        if self.mesh:
+            y = y.transpose(1, 2).contiguous().view(B, T, C // tp_size) # re-assemble all head outputs side by side
+        else:
+            y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
         # output projection
         y = self.resid_dropout(self.c_proj(y))
         return y
