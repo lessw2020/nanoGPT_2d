@@ -371,7 +371,7 @@ if not _use_tp:
     compiled_fn(model, optimizer, (X,Y)) 
         
     print(f"Success - one iteration completed.  Need to fix get_batch to run training loop")
-        #  None, , memmax, local_rank, total_steps_to_run=4)
+        
     dist.barrier()
     
 
