@@ -276,6 +276,10 @@ for block in model.transformer["h"]:
 """
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed._spmd.api import compile as spmd_compile
+
+from torch.distributed._spmd.parallel_mode import DataParallel
+
 
 # tp_gpt = parallelize_gpt(GPT(config).cuda(), device_mesh)
 # parallelize_block(block, mesh) for block in module.transformer["h"]]
@@ -342,13 +346,37 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, **extra_args
     model = torch.compile(model)  # requires PyTorch 2.0
 """
 # wrap model into DDP container
-if not _use_tp:
-    model = DDP(model, device_ids=[_local_rank])
-    fsdp_pg = None
 
+if not _use_tp:
+    fsdp_pg = None
+    X, Y = get_batch("train", fsdp_pg)  
+
+    #model = DDP(model, device_ids=[_local_rank])
+    def train_step(model, optimizer, batch):
+        X,Y = batch
+        optimizer.zero_grad()
+        logits, loss = model(X, Y)
+        loss.backward()
+        optimizer.step()
+
+        return loss
+    
+    compiled_fn = spmd_compile(parallel_mode=DataParallel('fully_shard'))(
+            train_step
+        )
+    print(f"compiled function completed. ")
+
+    
+    
+    compiled_fn(model, optimizer, (X,Y)) 
+        
+    print(f"Success - one iteration completed.  Need to fix get_batch to run training loop")
+        #  None, , memmax, local_rank, total_steps_to_run=4)
+    dist.barrier()
+    
 
 # TP and FSDP init
-# assert 1, "stopping here"
+assert 1, "stopping here"
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
