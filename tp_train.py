@@ -118,6 +118,7 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 
 # Init TP
 _use_tp: bool = False
+_use_pure_fsdp: bool = not _use_tp
 
 if _use_tp:
     _tp = int(os.environ.get("RANK", -1)) != -1  # verify distributed run
@@ -255,7 +256,7 @@ if _use_tp:
 else:
     gptconf = GPTConfig(**model_args)
     mesh = None
-    model = GPT(mesh, gptconf).cuda(_rank)
+    model = GPT(mesh, gptconf)# .cuda(_rank)
 
 
 
@@ -280,6 +281,9 @@ from torch.distributed._spmd.api import compile as spmd_compile
 
 from torch.distributed._spmd.parallel_mode import DataParallel
 
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, ModuleWrapPolicy
+import functools
+from model import Block, CausalSelfAttention, MLP
 
 # tp_gpt = parallelize_gpt(GPT(config).cuda(), device_mesh)
 # parallelize_block(block, mesh) for block in module.transformer["h"]]
@@ -290,7 +294,7 @@ from torch.distributed._spmd.parallel_mode import DataParallel
 
 rank = dist.get_rank()
 # fqn = get_parallelization_fqn(model)
-
+fsdp_pg = None
 if _use_tp:
     #print(f"{gptconf.n_layer=}")
     #assert False, "good"
@@ -316,7 +320,19 @@ if _use_tp:
     # todo - add back main code later for resume
 
     #model.to(device)
-    model = FSDP(model, device_id=device, process_group=fsdp_pg)
+    wrapping_policy = ModuleWrapPolicy({Block})
+    #wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
+    #functools.partial(transformer_auto_wrap_policy,
+    #    transformer_layer_cls=Block,)
+    model = FSDP(model, auto_wrap_policy = wrapping_policy, device_id=device, process_group=fsdp_pg)
+
+if _use_pure_fsdp:
+    assert not _use_tp, f"inconsistent config - tp true and fsdp true"
+    wrapping_policy = ModuleWrapPolicy({Block})
+    #wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
+    #functools.partial(transformer_auto_wrap_policy,
+    #    transformer_layer_cls=Block,)
+    model = FSDP(model, auto_wrap_policy = wrapping_policy, device_id=device) # , process_group=fsdp_pg)
 
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
@@ -346,13 +362,13 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, **extra_args
     model = torch.compile(model)  # requires PyTorch 2.0
 """
 # wrap model into DDP container
-
-if not _use_tp:
-    fsdp_pg = None
-    X, Y = get_batch("train", fsdp_pg)  
+_use_compiled_fsdp: bool = False
+if _use_compiled_fsdp:
+    #fsdp_pg = None
+    #X, Y = get_batch("train", fsdp_pg)  
 
     #model = DDP(model, device_ids=[_local_rank])
-    def train_step(model, optimizer, batch):
+    '''def train_step(model, optimizer, batch):
         X,Y = batch
         optimizer.zero_grad()
         logits, loss = model(X, Y)
@@ -373,10 +389,10 @@ if not _use_tp:
     print(f"Success - one iteration completed.  Need to fix get_batch to run training loop")
         
     dist.barrier()
-    
+    '''
 
 # TP and FSDP init
-assert 1, "stopping here"
+#assert 1, "stopping here"
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -417,6 +433,7 @@ def get_lr(it):
 #    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 # training loop
+
 X, Y = get_batch("train", fsdp_pg)  # fetch the very first batch
 
 local_iter_num = 0  # number of iterations in the lifetime of this process
