@@ -48,6 +48,12 @@ from torch.distributed.fsdp.wrap import (
 from torch.distributed._spmd.parallel_mode import DataParallel
 
 from model import GPTConfig, GPT
+from torch.distributed._spmd.api import compile
+
+
+# -------   Settings ------------
+_compiled_fsdp = True
+
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -93,7 +99,7 @@ device = (
     "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 )
 dtype = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-compile = True  # use PyTorch 2.0 to compile the model to be faster
+#compile = True  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [
     k
@@ -253,7 +259,7 @@ if dynamo:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-if ddp:
+if ddp and not _compiled_fsdp == True:
     #model = DDP(model, device_ids=[ddp_local_rank])
     model = FSDP(
         model,
@@ -301,9 +307,10 @@ def train_loop(
     #zero_print(f"tl zero grads")
     return loss
 
-_compiled_fsdp = True
+
 if _compiled_fsdp:
-    data_parallel_mode="full_shard"
+    data_parallel_mode="fully_shard"
+    print(f"----->   Compiling with fsdp....")
 
     compiled_fn = compile(parallel_mode=DataParallel(data_parallel_mode))(
                 train_loop
@@ -324,7 +331,7 @@ X, Y = get_batch("train")
 for i in range(train_iters):
         t0 = time.perf_counter()
         if _compiled_fsdp:
-            loss = compiled_fn(model, optimizer, input=(X,Y))
+            loss = compiled_fn(model, optimizer, inp=(X,Y))
         else:
             loss = train_loop(model, optimizer, inp=(X, Y))
 
