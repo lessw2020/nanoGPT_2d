@@ -25,6 +25,8 @@ from contextlib import nullcontext
 import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed._tensor import Replicate
+
 from torch.distributed import init_process_group, destroy_process_group
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -43,6 +45,7 @@ from torch.distributed.fsdp.wrap import (
     wrap,
 )
 
+from torch.distributed._spmd.parallel_mode import DataParallel
 
 from model import GPTConfig, GPT
 
@@ -280,25 +283,32 @@ def train_loop(
     inp,
 ):  #  profiler):
     # for i in range(train_iters):
-    zero_print(f"compile train loop, ")
+    #zero_print(f"compile train loop, ")
     X, Y = inp
 
     logits, loss = model(X, Y)
 
-    zero_print(f"training loss = {loss=}")
+    #zero_print(f"training loss = {loss=}")
     loss.backward()
-    zero_print(f"tl after backward")
+    #zero_print(f"tl after backward")
     opt.step()
-    zero_print(f"tl after step")
+    #zero_print(f"tl after step")
 
     # profiler.step()
-    zero_print(f"profiler step")
+    #zero_print(f"profiler step")
 
     opt.zero_grad(set_to_none=True)
-    zero_print(f"tl zero grads")
+    #zero_print(f"tl zero grads")
     return loss
 
+_compiled_fsdp = True
+if _compiled_fsdp:
+    data_parallel_mode="full_shard"
 
+    compiled_fn = compile(parallel_mode=DataParallel(data_parallel_mode))(
+                train_loop
+            )
+        
 def trace_handler(prof):
     print(f"**** Entered trace handler **********")
     # print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
@@ -313,7 +323,11 @@ X, Y = get_batch("train")
 
 for i in range(train_iters):
         t0 = time.perf_counter()
-        loss = train_loop(model, optimizer, inp=(X, Y))
+        if _compiled_fsdp:
+            loss = compiled_fn(model, optimizer, input=(X,Y))
+        else:
+            loss = train_loop(model, optimizer, inp=(X, Y))
+
         t1 = time.perf_counter()
 
         zero_print(f"\nTraining step: {i+1}")
