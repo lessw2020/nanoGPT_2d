@@ -230,6 +230,7 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
+        self.model_size: float = 0.0
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -259,7 +260,9 @@ class GPT(nn.Module):
                 )
 
         # report number of parameters
-        print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
+        total_params = self.get_num_params() / 1e6
+        print("number of parameters: %.2fM" % (total_params))
+        self.model_size = round(total_params, 4)
 
     def get_num_params(self, non_embedding=True):
         """

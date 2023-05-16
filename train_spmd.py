@@ -300,11 +300,13 @@ if dynamo_compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # wrap model into DDP container
-_pure_ddp = False
+_pure_ddp = True
 if _pure_ddp:
+    print(f"PURE DDP Init")
     model = DDP(
         model,
         device_ids=[ddp_local_rank],
+        broadcast_buffers=False,
     )  #  find_unused_parameters=False)
 
 # _mesh = DeviceMesh(_device, torch.arange(world_size))
@@ -395,6 +397,7 @@ from torch.distributed._spmd.graph_optimization import (
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 
+
 def _defunctionalize_fused_adam(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     stack = []
     for node in gm.graph.nodes:
@@ -422,6 +425,7 @@ def _defunctionalize_fused_adam(gm: torch.fx.GraphModule) -> torch.fx.GraphModul
     gm.graph.lint()
     gm.recompile()
     return gm
+
 
 class GraphModuleTransformation:
     def __init__(
@@ -464,18 +468,22 @@ class GraphModuleTransformation:
 
         return iter_gm
 
+
 ###
 ### Ugly patch end
 ###
 
 
-@compile(
+"""@compile(
     gm_transformation=GraphModuleTransformation(
         enable_graph_optimization=True,
         enable_inductor=True,
         dump_graphs=True,
     )
 )
+"""
+
+
 def train_loop(model, opt, inp):
     # for i in range(train_iters):
     # zero_print(f"compile train loop, ")
@@ -506,7 +514,7 @@ def trace_handler(prof):
 
 if _pure_ddp:
     model.train()
-    train_iters = 51
+    train_iters = 11
     accum = 0
     X, Y = get_batch("train")
 
@@ -535,10 +543,12 @@ if _pure_ddp:
                 accum += t1 - t0
 
     zero_print(f"Avg training time: {accum / (train_iters - 7):.4f}")
+    zero_print(f"Model size: {model.module.model_size} MB")
     torch.distributed.barrier()
 
 if not _pure_ddp:
-    train_iters = 51
+    print(f"compile training with profiler")
+    train_iters = 11
     accum = 0.0
     with torch.profiler.profile(
         activities=[
@@ -565,7 +575,6 @@ if not _pure_ddp:
             X, Y = get_batch("train")
 
     zero_print(f"Avg training time: {accum / (train_iters - 7):.4f}")
-
 
 
 if ddp:
