@@ -265,66 +265,53 @@ from model import CausalSelfAttention, MLP
 from torch.distributed.fsdp import (
     ShardingStrategy,
 )
+
+# from torch.distributed.fsdp._init_utils import _init_inter_node_process_group
 import torch.distributed as dist
+from torch.distributed._tensor import DeviceMesh
 
 
 # wrapper to avoid cluttering with if rank==0...
-def rank_print(x):
+def rank_print(*argv):
     if _rank == 0:
-        print(x)
+        for item in argv:
+            print(item)
 
 
 wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
-model_sharding_strategy = ShardingStrategy.HYBRID_SHARD
+model_sharding_strategy = ShardingStrategy.HYBRID_SHARD  #  _HYBRID_SHARD_ZERO2
 _world_size = dist.get_world_size()
-hybrid_parallel_size = 4  # we will split the gpus into two mini-nodes
 
-mesh = torch.arange(0, _world_size).view(hybrid_parallel_size, -1)
+# we will split the gpus of this node, into two mini-nodes
+if _world_size == 16:
+    node_size = 8
+elif _world_size == 8:
+    node_size = 4
+else:
+    node_size = 2
+rank_print(f"{node_size=}, with {_world_size=}")
 
+assert (
+    _world_size // node_size == 2
+), f"world size of {_world_size=} is not evenly divisible by {node_size=} to yield two mini-nodes"
+
+dmesh = torch.arange(0, _world_size).view(-1, node_size)
+rank_print(f"{dmesh=}, {dmesh[0].tolist()=}, {dmesh[1].tolist()=}")
+mesh = DeviceMesh(device_type="cuda", mesh=[dmesh[0].tolist(), dmesh[1].tolist()])
 rank_print(f"{mesh=}")
-_node_1 = [2, 3]  # mesh[0]
-_node_2 = [0, 1]  # mesh[1]
+mesh_groups = mesh.get_dim_groups()
+# dim 0 is like (0, 4), (1, 5) groups, dim 1 is like (0, 1, 2, 3)
+replicate_group, shard_group = mesh_groups[0], mesh_groups[1]
+rank_print(f"{replicate_group=}, {shard_group=}")
 
-rank_print(f"{_node_1=}")
-rank_print(f"{_node_2=}")
-backend = dist.get_backend()
-
-pg2 = dist.new_group(_node_2)  # , backend=backend)
-rank_print(f"type of pg2 = {type(pg2)}")
-assert isinstance(pg2, dist.ProcessGroup), f"pg2 not a pg"
-
-pg1 = dist.new_group(_node_1, backend=backend)
-rank_print(f"type of pg1 = {type(pg1)}")
-assert isinstance(pg1, dist.ProcessGroup), f"pg1 is not a pg"
+rank_print(dist.get_world_size(replicate_group), dist.get_world_size(shard_group))
 
 
-rank_print(f"type of pg2 is {type(pg2)}")
-
-rank_print(f"type of pg1 = {type(pg1)}")
-_tuple_mesh = (
-    pg1,
-    pg2,
-)
-rank_print(f"{_tuple_mesh=}")
-
-# isinstance(process_group, tuple)
-#        and len(process_group) == 2
-#        and all(isinstance(pg, dist.ProcessGroup) for pg in process_group)
-istuple = isinstance(_tuple_mesh, tuple)
-rank_print(f"{istuple=}")
-tmesh_len = len(_tuple_mesh)
-rank_print(f"len = {tmesh_len}")
-for tp in _tuple_mesh:
-    rank_print(f"{tp=} and type is {type(tp)}")
-
-checkall = all(isinstance(pg, dist.ProcessGroup) for pg in _tuple_mesh)
-assert checkall, "fnot all pg"
-rank_print(f"{checkall=}")
-# assert False, "good"
 if ddp and not _compiled_fsdp == True:
     # model = DDP(model, device_ids=[ddp_local_rank])
     model = FSDP(
         model,
+        process_group=(shard_group, replicate_group),
         # process_group=(pg1, pg2),
         auto_wrap_policy=wrapping_policy,
         # mixed_precision=mp_policy,
@@ -335,6 +322,11 @@ if ddp and not _compiled_fsdp == True:
         # limit_all_gathers=cfg.use_rate_limiter,
         use_orig_params=True,
     )
+
+shard_g = model.process_group
+replicate_g = model._inter_node_state.process_group
+assert shard_g == shard_group
+assert replicate_g == replicate_group
 
 # optimizer
 optimizer = model.configure_optimizers(
