@@ -52,7 +52,8 @@ from torch.distributed._spmd.api import compile
 
 
 # -------   Settings ------------
-_compiled_fsdp = True
+_compiled_fsdp = False
+_use_torch_compile = False
 
 
 # -----------------------------------------------------------------------------
@@ -115,8 +116,8 @@ ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
 if ddp:
     init_process_group(backend=backend)
     ddp_rank = int(os.environ["RANK"])
-    ddp_local_rank = int(os.environ["LOCAL_RANK"])
-    device = f"cuda:{ddp_local_rank}"
+    _rank = int(os.environ["LOCAL_RANK"])
+    device = f"cuda:{_rank}"
     torch.cuda.set_device(device)
     master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
     seed_offset = ddp_rank  # each process gets a different seed
@@ -252,8 +253,8 @@ if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
 
 # compile the model
-dynamo = False
-if dynamo:
+
+if _use_torch_compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
@@ -261,16 +262,74 @@ if dynamo:
 # wrap model into FSDP container
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from model import CausalSelfAttention, MLP
+from torch.distributed.fsdp import (
+    ShardingStrategy,
+)
+import torch.distributed as dist
+
+
+# wrapper to avoid cluttering with if rank==0...
+def rank_print(x):
+    if _rank == 0:
+        print(x)
+
 
 wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
+model_sharding_strategy = ShardingStrategy.HYBRID_SHARD
+_world_size = dist.get_world_size()
+hybrid_parallel_size = 4  # we will split the gpus into two mini-nodes
 
+mesh = torch.arange(0, _world_size).view(hybrid_parallel_size, -1)
+
+rank_print(f"{mesh=}")
+_node_1 = [2, 3]  # mesh[0]
+_node_2 = [0, 1]  # mesh[1]
+
+rank_print(f"{_node_1=}")
+rank_print(f"{_node_2=}")
+backend = dist.get_backend()
+
+pg2 = dist.new_group(_node_2)  # , backend=backend)
+rank_print(f"type of pg2 = {type(pg2)}")
+assert isinstance(pg2, dist.ProcessGroup), f"pg2 not a pg"
+
+pg1 = dist.new_group(_node_1, backend=backend)
+rank_print(f"type of pg1 = {type(pg1)}")
+assert isinstance(pg1, dist.ProcessGroup), f"pg1 is not a pg"
+
+
+rank_print(f"type of pg2 is {type(pg2)}")
+
+rank_print(f"type of pg1 = {type(pg1)}")
+_tuple_mesh = (
+    pg1,
+    pg2,
+)
+rank_print(f"{_tuple_mesh=}")
+
+# isinstance(process_group, tuple)
+#        and len(process_group) == 2
+#        and all(isinstance(pg, dist.ProcessGroup) for pg in process_group)
+istuple = isinstance(_tuple_mesh, tuple)
+rank_print(f"{istuple=}")
+tmesh_len = len(_tuple_mesh)
+rank_print(f"len = {tmesh_len}")
+for tp in _tuple_mesh:
+    rank_print(f"{tp=} and type is {type(tp)}")
+
+checkall = all(isinstance(pg, dist.ProcessGroup) for pg in _tuple_mesh)
+assert checkall, "fnot all pg"
+rank_print(f"{checkall=}")
+# assert False, "good"
 if ddp and not _compiled_fsdp == True:
     # model = DDP(model, device_ids=[ddp_local_rank])
     model = FSDP(
         model,
+        # process_group=(pg1, pg2),
         auto_wrap_policy=wrapping_policy,
         # mixed_precision=mp_policy,
         # sharding_strategy=model_sharding_strategy,
+        sharding_strategy=ShardingStrategy.HYBRID_SHARD,  # or ShardingStrategy._HYBRID_SHARD_ZERO2
         # backward_prefetch=backward_policy,
         device_id=torch.cuda.current_device(),  # streaming init
         # limit_all_gathers=cfg.use_rate_limiter,
