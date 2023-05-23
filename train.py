@@ -99,7 +99,7 @@ device = (
     "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 )
 dtype = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-#compile = True  # use PyTorch 2.0 to compile the model to be faster
+# compile = True  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [
     k
@@ -242,7 +242,7 @@ if block_size < model.config.block_size:
 model.to(device)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-#scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
+# scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 
 # optimizer
 optimizer = model.configure_optimizers(
@@ -258,17 +258,22 @@ if dynamo:
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
 
-# wrap model into DDP container
+# wrap model into FSDP container
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from model import CausalSelfAttention, MLP
+
+wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
+
 if ddp and not _compiled_fsdp == True:
-    #model = DDP(model, device_ids=[ddp_local_rank])
+    # model = DDP(model, device_ids=[ddp_local_rank])
     model = FSDP(
         model,
-        #auto_wrap_policy=wrapping_policy,
-        #mixed_precision=mp_policy,
-        #sharding_strategy=model_sharding_strategy,
-        #backward_prefetch=backward_policy,
+        auto_wrap_policy=wrapping_policy,
+        # mixed_precision=mp_policy,
+        # sharding_strategy=model_sharding_strategy,
+        # backward_prefetch=backward_policy,
         device_id=torch.cuda.current_device(),  # streaming init
-        #limit_all_gathers=cfg.use_rate_limiter,
+        # limit_all_gathers=cfg.use_rate_limiter,
         use_orig_params=True,
     )
 
@@ -276,6 +281,7 @@ if ddp and not _compiled_fsdp == True:
 optimizer = model.configure_optimizers(
     weight_decay, learning_rate, (beta1, beta2), device_type
 )
+
 
 def zero_print(msg):
     if torch.distributed.get_rank() == 0:
@@ -289,33 +295,32 @@ def train_loop(
     inp,
 ):  #  profiler):
     # for i in range(train_iters):
-    #zero_print(f"compile train loop, ")
+    # zero_print(f"compile train loop, ")
     X, Y = inp
 
     logits, loss = model(X, Y)
 
-    #zero_print(f"training loss = {loss=}")
+    # zero_print(f"training loss = {loss=}")
     loss.backward()
-    #zero_print(f"tl after backward")
+    # zero_print(f"tl after backward")
     opt.step()
-    #zero_print(f"tl after step")
+    # zero_print(f"tl after step")
 
     # profiler.step()
-    #zero_print(f"profiler step")
+    # zero_print(f"profiler step")
 
     opt.zero_grad(set_to_none=True)
-    #zero_print(f"tl zero grads")
+    # zero_print(f"tl zero grads")
     return loss
 
 
 if _compiled_fsdp:
-    data_parallel_mode="fully_shard"
+    data_parallel_mode = "fully_shard"
     print(f"----->   Compiling with fsdp....")
 
-    compiled_fn = compile(parallel_mode=DataParallel(data_parallel_mode))(
-                train_loop
-            )
-        
+    compiled_fn = compile(parallel_mode=DataParallel(data_parallel_mode))(train_loop)
+
+
 def trace_handler(prof):
     print(f"**** Entered trace handler **********")
     # print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
@@ -329,20 +334,20 @@ X, Y = get_batch("train")
 
 
 for i in range(train_iters):
-        t0 = time.perf_counter()
-        if _compiled_fsdp:
-            loss = compiled_fn(model, optimizer, inp=(X,Y))
-        else:
-            loss = train_loop(model, optimizer, inp=(X, Y))
+    t0 = time.perf_counter()
+    # if _compiled_fsdp:
+    #    loss = compiled_fn(model, optimizer, inp=(X, Y))
+    # else:
+    loss = train_loop(model, optimizer, inp=(X, Y))
 
-        t1 = time.perf_counter()
+    t1 = time.perf_counter()
 
-        zero_print(f"\nTraining step: {i+1}")
-        zero_print(f"Training loss: {loss}\n")
-        zero_print(f"Training time: {t1-t0:.4f}")
-        X, Y = get_batch("train")
+    zero_print(f"\nTraining step: {i+1}")
+    zero_print(f"Training loss: {loss}\n")
+    zero_print(f"Training time: {t1-t0:.4f}")
+    X, Y = get_batch("train")
 
-'''with torch.profiler.profile(
+"""with torch.profiler.profile(
     activities=[
         torch.profiler.ProfilerActivity.CPU,
         torch.profiler.ProfilerActivity.CUDA,
@@ -364,7 +369,7 @@ for i in range(train_iters):
         zero_print(f"Training time: {t1-t0:.4f}")
         X, Y = get_batch("train")
 
-'''
+"""
 torch.distributed.barrier()
 
 
