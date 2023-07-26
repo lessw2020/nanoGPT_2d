@@ -7,3 +7,7 @@ __pycache__/
 *.pt
 *.pyc
 input.txt
+*.log
+*.json
+*.yaml
+*.wandb
