@@ -1,0 +1,7 @@
+--> total memory per gpu (GB) = 14.6095
+--> total memory per gpu (GB) = 14.6095
+--> total memory per gpu (GB) = 14.6095
+--> total memory per gpu (GB) = 14.6095
+tokens per iteration will be: 491,520
+Initializing a new model from scratch
+defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)

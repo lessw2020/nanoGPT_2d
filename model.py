@@ -16,8 +16,8 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 # import bitsandbytes as bnb
-from lion_pytorch import Lion
-
+#from lion_pytorch import Lion
+from optimizers.rotational_adamw import RotationalAdamW
 
 class LayerNorm(nn.Module):
     """LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False"""
@@ -343,10 +343,11 @@ class GPT(nn.Module):
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
         extra_args = dict(use_triton=True)  # dict(fused=True) if use_fused else dict()
-        optimizer = Lion(  # torch.optim.AdamW(
+        optimizer = RotationalAdamW(
             optim_groups, lr=learning_rate, betas=betas, **extra_args
         )
-        print(f"using fused AdamW? : {use_fused}")
+        print(f"using Rotational AdamW")
+        #print(f"using fused AdamW? : {use_fused}")
 
         return optimizer
 
