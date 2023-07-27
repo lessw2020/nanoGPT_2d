@@ -1,7 +1,74 @@
---> total memory per gpu (GB) = 14.6095
---> total memory per gpu (GB) = 14.6095
---> total memory per gpu (GB) = 14.6095
---> total memory per gpu (GB) = 14.6095
+tokens per iteration will be: 491,520
 tokens per iteration will be: 491,520
 Initializing a new model from scratch
 defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)
+tokens per iteration will be: 491,520
+tokens per iteration will be: 491,520
+Initializing a new model from scratch
+defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)
+--> total memory per gpu (GB) = 22.035
+Initializing a new model from scratch
+defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)
+Initializing a new model from scratch
+defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)
+number of parameters: 202.53M
+num decayed parameter tensors: 50, with 203,554,816 parameters
+num non-decayed parameter tensors: 25, with 25,600 parameters
+number of parameters: 202.53M
+number of parameters: 202.53M
+number of parameters: 202.53M
+using Rotational AdamW
+compiling the model... (takes a ~minute)
+num decayed parameter tensors: 50, with 203,554,816 parameters
+num non-decayed parameter tensors: 25, with 25,600 parameters
+num decayed parameter tensors: 50, with 203,554,816 parameters
+num non-decayed parameter tensors: 25, with 25,600 parameters
+num decayed parameter tensors: 50, with 203,554,816 parameters
+num non-decayed parameter tensors: 25, with 25,600 parameters
+using Rotational AdamW
+compiling the model... (takes a ~minute)
+using Rotational AdamW
+compiling the model... (takes a ~minute)
+using Rotational AdamW
+compiling the model... (takes a ~minute)
+memory stats reset, ready to track
+step 0: train loss 11.0359, val loss 11.0353
+iter 0: loss 11.0377, time 138381.26ms, mfu -100.00%
+
+--> cuda max reserved memory = 18.8086
+--> max reserved percentage = 85.36 %
+
+--> cuda max memory allocated = 17.2504
+--> max allocated percentage = 78.29 %
+
+--> peak active memory = 17.2504
+--> peak active memory 78.29 %
+
+cudaMalloc retries = 0
+cuda OOM = 0
+
+iter 10: loss 10.0268, time 3888.13ms, mfu 13.84%
+iter 20: loss 9.3478, time 3887.20ms, mfu 13.84%
+iter 30: loss 8.8650, time 3887.11ms, mfu 13.84%
+iter 40: loss 8.7121, time 3887.17ms, mfu 13.84%
+iter 50: loss 8.2677, time 3888.03ms, mfu 13.84%
+iter 60: loss 8.1469, time 3887.57ms, mfu 13.84%
+iter 70: loss 7.9193, time 3886.73ms, mfu 13.84%
+iter 80: loss 7.8273, time 3887.62ms, mfu 13.84%
+iter 90: loss 7.3620, time 3888.75ms, mfu 13.84%
+iter 100: loss 7.3475, time 3888.07ms, mfu 13.84%
+iter 110: loss 7.1083, time 3887.66ms, mfu 13.84%
+iter 120: loss 7.1114, time 3887.31ms, mfu 13.84%
+iter 130: loss 6.9832, time 3886.91ms, mfu 13.84%
+iter 140: loss 7.0044, time 3887.26ms, mfu 13.84%
+iter 150: loss 6.6375, time 3886.65ms, mfu 13.84%
+iter 160: loss 6.7128, time 3887.85ms, mfu 13.84%
+iter 170: loss 6.5776, time 3888.12ms, mfu 13.84%
+iter 180: loss 6.5595, time 3887.65ms, mfu 13.84%
+iter 190: loss 6.6432, time 3888.68ms, mfu 13.84%
+step 200: train loss 6.4298, val loss 6.4817
+saving checkpoint to out
+iter 200: loss 6.2826, time 51439.16ms, mfu 12.56%
+iter 210: loss 6.2276, time 3885.79ms, mfu 12.69%
+iter 220: loss 6.3640, time 3889.76ms, mfu 12.80%
+iter 230: loss 5.9309, time 3890.49ms, mfu 12.91%

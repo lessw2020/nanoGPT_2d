@@ -31,7 +31,7 @@ from model import GPTConfig, GPT
 
 from gpu_memory import Memory_Maximizer
 
-memstats = Memory_Maximizer()
+
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
@@ -69,9 +69,7 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 300  # how many steps to warm up for
 lr_decay_iters = 6000  # should be ~= max_iters per Chinchilla
-min_lr = (
-    6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
-)
+min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = "nccl"  # 'nccl', 'gloo', etc.
 # system
@@ -134,6 +132,9 @@ ctx = (
     if device_type == "cpu"
     else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 )
+
+# memory stats
+memstats = Memory_Maximizer(rank=ddp_rank)
 
 # poor man's data loader
 data_dir = os.path.join("data", dataset)
@@ -373,6 +374,8 @@ while True:
     optimizer.zero_grad(set_to_none=True)
     # print(f"at memstats update")
     memstats.update()
+    if iter_num == 2:
+        memstats.summary()
     # timing and logging
     t1 = time.time()
     dt = t1 - t0
@@ -394,7 +397,8 @@ while True:
     if iter_num > max_iters:
         break
 
-if ddp_local_rank == 0:
-    memstats.stop()
+
+memstats.stop()
+
 if ddp:
     destroy_process_group()

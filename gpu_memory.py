@@ -161,4 +161,4 @@ class Memory_Maximizer:
     def summary(
         self,
     ):
-        pass
+        self.stop()
