@@ -15,9 +15,12 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# import bitsandbytes as bnb
+import bitsandbytes as bnb
+
 # from lion_pytorch import Lion
 from optimizers.rotational_adamw import RotationalAdamW
+from layers.sigma_reparam import SigmaLinear
+from optimizers.anyprecision import AnyPrecisionAdamW
 
 
 class LayerNorm(nn.Module):
@@ -109,16 +112,18 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.c_fc = torch.nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu = nn.GELU()
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
-        self.dropout = nn.Dropout(config.dropout)
+        self.c_proj = torch.nn.Linear(
+            4 * config.n_embd, config.n_embd, bias=config.bias
+        )
+        # self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
         x = self.gelu(x)
         x = self.c_proj(x)
-        x = self.dropout(x)
+        # x = self.dropout(x)
         return x
 
 
@@ -343,13 +348,15 @@ class GPT(nn.Module):
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
-        # extra_args = dict(use_triton=True)  # dict(fused=True) if use_fused else dict()
-        optimizer = RotationalAdamW(
+        # extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = AnyPrecisionAdamW(
             optim_groups,
             lr=learning_rate,
-            betas=betas,  #  **extra_args
+            betas=betas,
+            # momentum_dtype=
+            # **extra_args
         )
-        print(f"using Rotational AdamW")
+        print(f"using AnyPrecision var_bf16 AdamW")
         # print(f"using fused AdamW? : {use_fused}")
 
         return optimizer

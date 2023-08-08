@@ -43,9 +43,9 @@ eval_only = False  # if True, script exits right after the first eval
 always_save_checkpoint = False  # if True, always save a checkpoint after each eval
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
-wandb_log = True  # disabled by default
+wandb_log = False  # disabled by default
 wandb_project = "owt_basic"
-wandb_run_name = "gpt2-rotational-adamw"  # 'run' + str(time.time())
+wandb_run_name = "gpt2-Any-1616"  # 'run' + str(time.time())
 # data
 dataset = "openwebtext"
 gradient_accumulation_steps = 5 * 8  # used to simulate larger batch sizes
@@ -60,7 +60,7 @@ dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
-max_iters = 6000  # total number of training iterations
+max_iters = 30  # 6000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.95  # 0.9
 beta2 = 0.98  # 0.95
@@ -127,11 +127,10 @@ ptdtype = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
 }[dtype]
-ctx = (
-    nullcontext()
-    if device_type == "cpu"
-    else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
-)
+ctx = nullcontext()
+#    if device_type == "cpu"
+#    else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+# )
 
 # memory stats
 memstats = Memory_Maximizer(rank=ddp_rank)
@@ -236,6 +235,7 @@ if block_size < model.config.block_size:
         "block_size"
     ] = block_size  # so that the checkpoint will have the right value
 model.to(device)
+model.to(torch.bfloat16)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
@@ -253,7 +253,7 @@ if compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
-
+    print(f"compiling completed - rank {ddp_local_rank}")
 # wrap model into DDP container
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank], gradient_as_bucket_view=True)

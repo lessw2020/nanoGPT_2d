@@ -17,6 +17,7 @@ class SigmaLinear(nn.Linear):
             sigma = self.get_sigma()
         self.register_buffer("spectral_norm", sigma)
         self.sigma = nn.Parameter(torch.ones(1))
+        # print(f"{self.spectral_norm=}")
 
     def get_sigma(self):
         with torch.no_grad():
@@ -26,7 +27,7 @@ class SigmaLinear(nn.Linear):
             u = self.weight.T.mv(v)
             u = F.normalize(u, dim=0)
             self.u.data.copy_(u)
-        result = torch.sum(v * torch.matmul(self.weight, u))
+            return torch.sum(v * torch.matmul(self.weight, u))
 
     def get_weight(
         self,
