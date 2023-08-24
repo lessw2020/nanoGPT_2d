@@ -1,0 +1,316 @@
+Node IP: 10.200.66.18
+Successfully paused profiling.
+[2023-08-24 21:10:33,055] torch.distributed.run: [WARNING] master_addr is only used for static rdzv_backend and when rdzv_endpoint is not specified.
+[2023-08-24 21:10:33,055] torch.distributed.run: [WARNING] 
+[2023-08-24 21:10:33,055] torch.distributed.run: [WARNING] *****************************************
+[2023-08-24 21:10:33,055] torch.distributed.run: [WARNING] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+[2023-08-24 21:10:33,055] torch.distributed.run: [WARNING] *****************************************
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO] Starting elastic_operator with launch configs:
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   entrypoint       : ./train.py
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   min_nodes        : 2
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   max_nodes        : 2
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   nproc_per_node   : 8
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   run_id           : 101
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   rdzv_backend     : c10d
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   rdzv_endpoint    : 10.200.66.18:29500
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   rdzv_configs     : {'timeout': 900}
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   max_restarts     : 0
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   monitor_interval : 5
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   log_dir          : None
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO]   metrics_cfg      : {}
+[2023-08-24 21:10:33,055] torch.distributed.launcher.api: [INFO] 
+[2023-08-24 21:10:33,062] torch.distributed.elastic.agent.server.local_elastic_agent: [INFO] log directory set to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf
+[2023-08-24 21:10:33,062] torch.distributed.elastic.agent.server.api: [INFO] [default] starting workers for entrypoint: python
+[2023-08-24 21:10:33,062] torch.distributed.elastic.agent.server.api: [INFO] [default] Rendezvous'ing worker group
+[2023-08-24 21:10:33,573] torch.distributed.run: [WARNING] master_addr is only used for static rdzv_backend and when rdzv_endpoint is not specified.
+[2023-08-24 21:10:33,574] torch.distributed.run: [WARNING] 
+[2023-08-24 21:10:33,574] torch.distributed.run: [WARNING] *****************************************
+[2023-08-24 21:10:33,574] torch.distributed.run: [WARNING] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+[2023-08-24 21:10:33,574] torch.distributed.run: [WARNING] *****************************************
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO] Starting elastic_operator with launch configs:
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   entrypoint       : ./train.py
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   min_nodes        : 2
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   max_nodes        : 2
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   nproc_per_node   : 8
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   run_id           : 101
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   rdzv_backend     : c10d
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   rdzv_endpoint    : 10.200.66.18:29500
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   rdzv_configs     : {'timeout': 900}
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   max_restarts     : 0
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   monitor_interval : 5
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   log_dir          : None
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO]   metrics_cfg      : {}
+[2023-08-24 21:10:33,574] torch.distributed.launcher.api: [INFO] 
+[2023-08-24 21:10:33,583] torch.distributed.elastic.agent.server.local_elastic_agent: [INFO] log directory set to: /tmp/torchelastic_sad350p3/101_2kzisnxm
+[2023-08-24 21:10:33,583] torch.distributed.elastic.agent.server.api: [INFO] [default] starting workers for entrypoint: python
+[2023-08-24 21:10:33,583] torch.distributed.elastic.agent.server.api: [INFO] [default] Rendezvous'ing worker group
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO] [default] Rendezvous complete for workers. Result:
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   restart_count=0
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   master_addr=a100-st-p4d24xlarge-0.pytorch.hpcaas
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   master_port=41659
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   group_rank=0
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   group_world_size=2
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   local_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   role_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   global_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   role_world_sizes=[16, 16, 16, 16, 16, 16, 16, 16]
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO]   global_world_sizes=[16, 16, 16, 16, 16, 16, 16, 16]
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO] 
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.api: [INFO] [default] Starting worker group
+[2023-08-24 21:10:34,223] torch.distributed.elastic.agent.server.local_elastic_agent: [INFO] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker0 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/0/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker1 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/1/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker2 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/2/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker3 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/3/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker4 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/4/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker5 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/5/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker6 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/6/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.multiprocessing: [INFO] Setting worker7 reply file to: /tmp/torchelastic_f1bscuym/101_ajv1vvxf/attempt_0/7/error.json
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO] [default] Rendezvous complete for workers. Result:
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   restart_count=0
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   master_addr=a100-st-p4d24xlarge-0.pytorch.hpcaas
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   master_port=41659
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   group_rank=1
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   group_world_size=2
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   local_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   role_ranks=[8, 9, 10, 11, 12, 13, 14, 15]
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   global_ranks=[8, 9, 10, 11, 12, 13, 14, 15]
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   role_world_sizes=[16, 16, 16, 16, 16, 16, 16, 16]
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO]   global_world_sizes=[16, 16, 16, 16, 16, 16, 16, 16]
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO] 
+[2023-08-24 21:10:34,224] torch.distributed.elastic.agent.server.api: [INFO] [default] Starting worker group
+[2023-08-24 21:10:34,226] torch.distributed.elastic.agent.server.local_elastic_agent: [INFO] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker0 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/0/error.json
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker1 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/1/error.json
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker2 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/2/error.json
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker3 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/3/error.json
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker4 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/4/error.json
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker5 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/5/error.json
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker6 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/6/error.json
+[2023-08-24 21:10:34,226] torch.distributed.elastic.multiprocessing: [INFO] Setting worker7 reply file to: /tmp/torchelastic_sad350p3/101_2kzisnxm/attempt_0/7/error.json
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+Traceback (most recent call last):
+  File "/data/home/less/nanoGPT_2d/./train.py", line 108, in <module>
+    assert gradient_accumulation_steps % ddp_world_size == 0
+AssertionError
+[2023-08-24 21:10:44,308] torch.distributed.elastic.multiprocessing.api: [ERROR] failed (exitcode: 1) local_rank: 0 (pid: 2109990) of binary: /data/home/less/miniconda3/bin/python
+[2023-08-24 21:10:44,312] torch.distributed.elastic.multiprocessing.errors: [INFO] ('local_rank %s FAILED with no error file. Decorate your entrypoint fn with @record for traceback info. See: https://pytorch.org/docs/stable/elastic/errors.html', 0)
+Traceback (most recent call last):
+  File "/data/home/less/miniconda3/bin/torchrun", line 8, in <module>
+[2023-08-24 21:10:44,312] torch.distributed.elastic.multiprocessing.api: [ERROR] failed (exitcode: 1) local_rank: 0 (pid: 1689279) of binary: /data/home/less/miniconda3/bin/python
+    sys.exit(main())
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 346, in wrapper
+    return f(*args, **kwargs)
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/run.py", line 806, in main
+[2023-08-24 21:10:44,317] torch.distributed.elastic.multiprocessing.errors: [INFO] ('local_rank %s FAILED with no error file. Decorate your entrypoint fn with @record for traceback info. See: https://pytorch.org/docs/stable/elastic/errors.html', 8)
+Traceback (most recent call last):
+  File "/data/home/less/miniconda3/bin/torchrun", line 8, in <module>
+    run(args)
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/run.py", line 797, in run
+    sys.exit(main())
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 346, in wrapper
+    elastic_launch(
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/launcher/api.py", line 134, in __call__
+    return f(*args, **kwargs)
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/run.py", line 806, in main
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/launcher/api.py", line 264, in launch_agent
+    run(args)
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/run.py", line 797, in run
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+./train.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 2109991)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 2109992)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 2109993)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[4]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 4 (local_rank: 4)
+  exitcode  : 1 (pid: 2109994)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[5]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 5 (local_rank: 5)
+  exitcode  : 1 (pid: 2109995)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[6]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 6 (local_rank: 6)
+  exitcode  : 1 (pid: 2109996)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[7]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 7 (local_rank: 7)
+  exitcode  : 1 (pid: 2109997)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-0.pytorch.hpcaas
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 2109990)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+    elastic_launch(
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/launcher/api.py", line 134, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/data/home/less/miniconda3/lib/python3.9/site-packages/torch/distributed/launcher/api.py", line 264, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+./train.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 9 (local_rank: 1)
+  exitcode  : 1 (pid: 1689280)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 10 (local_rank: 2)
+  exitcode  : 1 (pid: 1689281)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 11 (local_rank: 3)
+  exitcode  : 1 (pid: 1689282)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[4]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 12 (local_rank: 4)
+  exitcode  : 1 (pid: 1689283)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[5]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 13 (local_rank: 5)
+  exitcode  : 1 (pid: 1689284)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[6]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 14 (local_rank: 6)
+  exitcode  : 1 (pid: 1689285)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[7]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 15 (local_rank: 7)
+  exitcode  : 1 (pid: 1689286)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2023-08-24_21:10:44
+  host      : a100-st-p4d24xlarge-1.pytorch.hpcaas
+  rank      : 8 (local_rank: 0)
+  exitcode  : 1 (pid: 1689279)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+srun: error: a100-st-p4d24xlarge-0: task 0: Exited with exit code 1
+srun: launch/slurm: _step_signal: Terminating StepId=3684.1
+srun: error: a100-st-p4d24xlarge-1: task 1: Exited with exit code 1
+Successfully resumed profiling.
