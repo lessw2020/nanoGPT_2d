@@ -2,9 +2,9 @@
 
 #SBATCH --job-name=nanogpt_base_sshz2
 
-#SBATCH --ntasks=10
+#SBATCH --ntasks=4
 
-#SBATCH --nodes=10
+#SBATCH --nodes=4
 
 #SBATCH --gpus-per-task=8
 
@@ -38,5 +38,5 @@ export CUDA_LAUNCH_BLOCKING=0
 # set the network interface
 export NCCL_SOCKET_IFNAME="eth0,en,eth,em,bond"
 dcgmi profile --pause
-srun torchrun --nnodes 10 --nproc_per_node 8 --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint "$head_node_ip:29500" ./train.py
+srun torchrun --nnodes 4 --nproc_per_node 8 --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint "$head_node_ip:29500" ./train.py
 dcgmi profile --resume

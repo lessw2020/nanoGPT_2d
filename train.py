@@ -282,14 +282,13 @@ from torch.distributed.fsdp import (
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh
 
-
-
-
 # ======================= Sharding ==========================
 
 wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
-model_sharding_strategy = ShardingStrategy.HYBRID_SHARD
+model_sharding_strategy = ShardingStrategy. HYBRID_SHARD  # or _HYBRID_SHARD_ZERO2 
+
 _world_size = dist.get_world_size()
+
 rank_print(f"{model_sharding_strategy=}")
 rank_print(f"{_world_size=}")
 use_ssdp: bool = True
@@ -309,6 +308,7 @@ assert (
     _world_size // node_size == 2
 ), f"world size of {_world_size=} is not evenly divisible by {node_size=} to yield two mini-nodes"
 '''
+# =========  Create Device Mesh to allocate scaling groups ==================
 mesh_list = []
 dmesh = torch.arange(0, _world_size).view(-1, scaling_group_size)
 for i, sg in enumerate(dmesh):
@@ -317,7 +317,7 @@ for i, sg in enumerate(dmesh):
 
 rank_print(f"{dmesh=}, \n{mesh_list=}")
 
-mesh = DeviceMesh(device_type="cuda", mesh=[dmesh[0].tolist(), dmesh[1].tolist()])
+mesh = DeviceMesh(device_type="cuda", mesh=mesh_list) 
 
 rank_print(f"{mesh=}")
 
@@ -327,12 +327,16 @@ replicate_group, shard_group = mesh_groups[0], mesh_groups[1]
 rank_print(f"{replicate_group=}, {shard_group=}")
 
 rank_print(dist.get_world_size(replicate_group), dist.get_world_size(shard_group))
+ 
+# ======= End Device Mesh ======================
 
-if ddp and not _compiled_fsdp == True:
+# ======= Initialize FSDP with Scaling groups, and verify ===========
+
+if ddp and not _compiled_fsdp:
     # model = DDP(model, device_ids=[ddp_local_rank])
     model = FSDP(
         model,
-        # process_group=(shard_group, replicate_group),
+        process_group=(shard_group, replicate_group),
         # process_group=(pg1, pg2),
         auto_wrap_policy=wrapping_policy,
         # mixed_precision=mp_policy,
@@ -344,11 +348,11 @@ if ddp and not _compiled_fsdp == True:
         use_orig_params=True,
     )
 
-shard_g = model.process_group
-replicate_g = model._inter_node_state.process_group
-assert shard_g == shard_group
-assert replicate_g == replicate_group
-assert False, "sstop"
+    shard_g = model.process_group
+    replicate_g = model._inter_node_state.process_group
+    assert shard_g == shard_group
+    assert replicate_g == replicate_group
+#assert False, "sstop"
 # optimizer
 optimizer = model.configure_optimizers(
     weight_decay, learning_rate, (beta1, beta2), device_type
