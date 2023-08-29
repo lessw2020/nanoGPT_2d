@@ -124,7 +124,7 @@ class GPTConfig:
 
 class GPT(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config, rank=None):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
@@ -152,7 +152,10 @@ class GPT(nn.Module):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
         # report number of parameters
-        print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
+        if not rank or rank==0:
+            print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
+        
+
 
     def get_num_params(self, non_embedding=True):
         """
@@ -266,7 +269,7 @@ class GPT(nn.Module):
 
         return model
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type, rank=None):
         """
         This long function is unfortunately doing something very simple and is being very defensive:
         We are separating out all parameters of the model into two buckets: those that will experience
@@ -318,7 +321,8 @@ class GPT(nn.Module):
         ]
         # new PyTorch nightly has a new 'fused' option for AdamW that is much faster
         use_fused = (device_type == 'cuda') and ('fused' in inspect.signature(torch.optim.AdamW).parameters)
-        print(f"using fused AdamW: {use_fused}")
+        if rank is None or rank==0:
+            print(f"using fused AdamW: {use_fused}")
         extra_args = dict(fused=True) if use_fused else dict()
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
 

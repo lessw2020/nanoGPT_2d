@@ -55,6 +55,8 @@ from torch.distributed._spmd.api import compile
 _compiled_fsdp = False
 _use_torch_compile = False
 
+os.environ["NCCL_CROSS_NIC"]="1"
+
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -73,12 +75,12 @@ wandb_run_name = "gpt2"  # 'run' + str(time.time())
 # data
 dataset = "openwebtext"
 gradient_accumulation_steps = 5  # used to simulate larger batch sizes
-batch_size = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 8  # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
-n_layer = 12
-n_head = 12
-n_embd = 768
+n_layer = 16
+n_head = 16
+n_embd = 1024
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
@@ -173,6 +175,12 @@ def get_batch(split):
 iter_num = 0
 best_val_loss = 1e9
 
+# wrapper to avoid cluttering with if rank==0...
+def rank_print(*argv):
+    if _rank == 0:
+        for item in argv:
+            print(item)
+
 # attempt to derive vocab_size from the dataset
 meta_path = os.path.join(data_dir, "meta.pkl")
 meta_vocab_size = None
@@ -180,7 +188,7 @@ if os.path.exists(meta_path):
     with open(meta_path, "rb") as f:
         meta = pickle.load(f)
     meta_vocab_size = meta["vocab_size"]
-    print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+    rank_print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
 # model init
 model_args = dict(
@@ -194,17 +202,17 @@ model_args = dict(
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
-    print("Initializing a new model from scratch")
+    rank_print("Initializing a new model from scratch")
     # determine the vocab size we'll use for from-scratch training
     if meta_vocab_size is None:
-        print(
+        rank_print(
             "defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)"
         )
     model_args["vocab_size"] = meta_vocab_size if meta_vocab_size is not None else 50304
     gptconf = GPTConfig(**model_args)
     model = GPT(gptconf)
 elif init_from == "resume":
-    print(f"Resuming training from {out_dir}")
+    rank_print(f"Resuming training from {out_dir}")
     # resume training from a checkpoint.
     ckpt_path = os.path.join(out_dir, "ckpt.pt")
     checkpoint = torch.load(ckpt_path, map_location=device)
@@ -213,10 +221,14 @@ elif init_from == "resume":
     # the rest of the attributes (e.g. dropout) can stay as desired from command line
     for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
         model_args[k] = checkpoint_model_args[k]
+
+
     # create the model
     gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
+    model = GPT(gptconf, rank=_rank)
     state_dict = checkpoint["model"]
+
+
     # fix the keys of the state dictionary :(
     # honestly no idea how checkpoints sometimes get this prefix, have to debug more
     unwanted_prefix = "_orig_mod."
@@ -247,7 +259,7 @@ model.to(device)
 
 # optimizer
 optimizer = model.configure_optimizers(
-    weight_decay, learning_rate, (beta1, beta2), device_type
+    weight_decay, learning_rate, (beta1, beta2), device_type, rank=_rank,
 )
 if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
@@ -271,16 +283,18 @@ import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh
 
 
-# wrapper to avoid cluttering with if rank==0...
-def rank_print(*argv):
-    if _rank == 0:
-        for item in argv:
-            print(item)
 
+
+# ======================= Sharding ==========================
 
 wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
-model_sharding_strategy = ShardingStrategy.FULL_SHARD #  HYBRID_SHARD  #  _HYBRID_SHARD_ZERO2
+model_sharding_strategy = ShardingStrategy.HYBRID_SHARD
 _world_size = dist.get_world_size()
+rank_print(f"{model_sharding_strategy=}")
+rank_print(f"{_world_size=}")
+use_ssdp: bool = True
+scaling_group_size = 2  # how many gpus 
+# ============================================================
 '''
 # we will split the gpus of this node, into two mini-nodes
 if _world_size == 16:
@@ -294,18 +308,25 @@ rank_print(f"{node_size=}, with {_world_size=}")
 assert (
     _world_size // node_size == 2
 ), f"world size of {_world_size=} is not evenly divisible by {node_size=} to yield two mini-nodes"
+'''
+mesh_list = []
+dmesh = torch.arange(0, _world_size).view(-1, scaling_group_size)
+for i, sg in enumerate(dmesh):
+    rank_print(f"{i=}, {sg=}")
+    mesh_list.append(sg.tolist())
 
-dmesh = torch.arange(0, _world_size).view(-1, node_size)
-rank_print(f"{dmesh=}, {dmesh[0].tolist()=}, {dmesh[1].tolist()=}")
+rank_print(f"{dmesh=}, \n{mesh_list=}")
+
 mesh = DeviceMesh(device_type="cuda", mesh=[dmesh[0].tolist(), dmesh[1].tolist()])
+
 rank_print(f"{mesh=}")
+
 mesh_groups = mesh.get_dim_groups()
 # dim 0 is like (0, 4), (1, 5) groups, dim 1 is like (0, 1, 2, 3)
 replicate_group, shard_group = mesh_groups[0], mesh_groups[1]
 rank_print(f"{replicate_group=}, {shard_group=}")
 
 rank_print(dist.get_world_size(replicate_group), dist.get_world_size(shard_group))
-'''
 
 if ddp and not _compiled_fsdp == True:
     # model = DDP(model, device_ids=[ddp_local_rank])
@@ -323,11 +344,11 @@ if ddp and not _compiled_fsdp == True:
         use_orig_params=True,
     )
 
-# shard_g = model.process_group
-#replicate_g = model._inter_node_state.process_group
-# assert shard_g == shard_group
-# assert replicate_g == replicate_group
-
+shard_g = model.process_group
+replicate_g = model._inter_node_state.process_group
+assert shard_g == shard_group
+assert replicate_g == replicate_group
+assert False, "sstop"
 # optimizer
 optimizer = model.configure_optimizers(
     weight_decay, learning_rate, (beta1, beta2), device_type
@@ -380,22 +401,37 @@ def trace_handler(prof):
 
 
 model.train()
-train_iters = 11
+train_iters = 33
 X, Y = get_batch("train")
+local_accum = []
+global_accum = []
+global_grad_synch = False
+zero_print(f"HSDP - every iter global synch")
 
-
-for i in range(train_iters):
+zero_print(f"Using SSDP = {use_ssdp=} ")
+for i in range(1,train_iters+1):
     t0 = time.perf_counter()
-    # if _compiled_fsdp:
-    #    loss = compiled_fn(model, optimizer, inp=(X, Y))
-    # else:
-    loss = train_loop(model, optimizer, inp=(X, Y))
+    if use_ssdp and i % 4:
+        with model.no_sync(disable_all_reduce_only=True):
+            global_grad_synch=False
+            loss = train_loop(model, optimizer, inp=(X, Y))
+    else:
+    
+        loss = train_loop(model, optimizer, inp=(X, Y))
+        global_grad_synch=True
 
     t1 = time.perf_counter()
 
-    zero_print(f"\nTraining step: {i+1}")
+    zero_print(f"\nTraining step: {i}, with {global_grad_synch=}")
     zero_print(f"Training loss: {loss}\n")
     zero_print(f"Training time: {t1-t0:.4f}")
+    net_time = round(t1-t0,4)
+    if i>4:
+        if global_grad_synch:
+            global_accum.append(net_time)
+        else:
+            local_accum.append(net_time)
+
     X, Y = get_batch("train")
 
 """with torch.profiler.profile(
@@ -422,6 +458,14 @@ for i in range(train_iters):
 
 """
 torch.distributed.barrier()
+if local_accum:
+    local_average_time = round(sum(local_accum)/len(local_accum),4)
+    zero_print(f"{local_average_time=}")
+
+if global_accum:
+    global_average_time = round(sum(global_accum)/len(global_accum),4)
+    zero_print(f"{global_average_time=}")
+
 
 
 """assert False, "good stop"
