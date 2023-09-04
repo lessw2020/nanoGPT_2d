@@ -21,6 +21,7 @@ import bitsandbytes as bnb
 from optimizers.rotational_adamw import RotationalAdamW
 from layers.sigma_reparam import SigmaLinear
 from optimizers.anyprecision import AnyPrecisionAdamW
+from optimizers.adameta import AdmetaR
 
 
 class LayerNorm(nn.Module):
@@ -50,18 +51,71 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
+        self.flash = (
+            False  # hasattr(torch.nn.functional, "scaled_dot_product_attention")
+        )
+
         if not self.flash:
             print(
                 "WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0"
             )
-            # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer(
-                "bias",
-                torch.tril(torch.ones(config.block_size, config.block_size)).view(
-                    1, 1, config.block_size, config.block_size
-                ),
+            # ====  Add Alibi ========
+            attn_mask = self.get_causal_mask(config.block_size).repeat(
+                config.n_head, 1, 1
             )
+            print(f"{attn_mask=}")
+            attn_mask = self.get_alibi_mask(self.n_head, config.block_size)
+            self.register_buffer("attn_mask", attn_mask, persistent=False)
+            # causal mask to ensure that attention is only applied to the left in the input sequence
+            # self.register_buffer(
+            #     "bias",
+            #     torch.tril(torch.ones(config.block_size, config.block_size)).view(
+            #         1, 1, config.block_size, config.block_size
+            #     ),
+            # )
+
+    @classmethod
+    def get_causal_mask(cls, N):
+        causal_mask = torch.ones(N, N).tril()
+        causal_mask = causal_mask.masked_fill(causal_mask == 0, -float("inf"))
+        return causal_mask
+
+    @classmethod
+    def get_alibi_slopes(cls, n):
+        """
+        Compute ALiBi slopes for a given number of heads. Adopted from
+        https://github.com/ofirpress/attention_with_linear_biases.
+        """
+
+        def get_slopes_power_of_2(n):
+            start = 2 ** (-(2 ** -(math.log2(n) - 3)))
+            ratio = start
+            return [start * ratio**i for i in range(n)]
+
+        if math.log2(n).is_integer():
+            return get_slopes_power_of_2(
+                n
+            )  # In the paper, we only train models that have 2^a heads for some a. This function has
+        else:  # some good properties that only occur when the input is a power of 2. To maintain that even
+            closest_power_of_2 = 2 ** math.floor(
+                math.log2(n)
+            )  # when the number of heads is not a power of 2, we use this workaround.
+            return (
+                get_slopes_power_of_2(closest_power_of_2)
+                + cls.get_alibi_slopes(2 * closest_power_of_2)[0::2][
+                    : n - closest_power_of_2
+                ]
+            )
+
+    @classmethod
+    def get_alibi_mask(cls, num_heads, N):
+        distance_matrix = torch.arange(N) - torch.arange(N).view(-1, 1)
+        scalars = torch.tensor(cls.get_alibi_slopes(num_heads))
+        alibi_mask = distance_matrix * scalars.view(
+            -1, 1, 1
+        )  # (N,N) * (nh, 1, 1) -> (nh, N,N)
+        print(f"alibi mask generated = {alibi_mask.shape=}")
+        return alibi_mask
 
     def forward(self, x):
         (
@@ -70,6 +124,7 @@ class CausalSelfAttention(nn.Module):
             C,
         ) = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
+        attn_mask = self.attn_mask[:, :T, :T]  # (nh, T, T)
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(
@@ -95,10 +150,16 @@ class CausalSelfAttention(nn.Module):
             )
         else:
             # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+            # att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+            # att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+            att = q @ k.transpose(
+                -2, -1
+            )  # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+            att += attn_mask  # (B, nh, T, T) + (nh, T, T) -> (B, nh, T, T)
+            att *= 1.0 / math.sqrt(T)
+
             att = F.softmax(att, dim=-1)
-            att = self.attn_dropout(att)
+            # att = self.attn_dropout(att)
             y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = (
             y.transpose(1, 2).contiguous().view(B, T, C)
@@ -158,11 +219,14 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
+        self.using_alibi = True
 
         self.transformer = nn.ModuleDict(
             dict(
                 wte=torch.nn.Embedding(config.vocab_size, config.n_embd),
-                wpe=torch.nn.Embedding(config.block_size, config.n_embd),
+                wpe=torch.nn.Embedding(config.block_size, config.n_embd)
+                if not self.using_alibi
+                else None,
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 ln_f=LayerNorm(config.n_embd, bias=config.bias),
@@ -197,7 +261,7 @@ class GPT(nn.Module):
         params are actually used as weights in the final layer, so we include them.
         """
         n_params = sum(p.numel() for p in self.parameters())
-        if non_embedding:
+        if non_embedding and self.transformer.wpe:
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
@@ -219,8 +283,18 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        # pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (t, n_embd)
+        # x = self.transformer.drop(tok_emb + pos_emb)
+        # if self.config.pos_encoding == "learned":
+        #    pos = torch.arange(0, t, dtype=torch.long, device=device).unsqueeze(0)
+        #    pos_emb = self.transformer.wpe(
+        #        pos
+        #    )  # position embeddings of shape (1, t, n_embd)
+        #    x = tok_emb + pos_emb
+        # elif self.config.pos_encoding in ["nope", "alibi"]:
+        x = tok_emb
+        # else:
+        #    raise Exception("Invalid positional encoding type")
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -246,9 +320,10 @@ class GPT(nn.Module):
         # but want to use a smaller block size for some smaller, simpler model
         assert block_size <= self.config.block_size
         self.config.block_size = block_size
-        self.transformer.wpe.weight = nn.Parameter(
-            self.transformer.wpe.weight[:block_size]
-        )
+        if self.transformer.wpe:
+            self.transformer.wpe.weight = nn.Parameter(
+                self.transformer.wpe.weight[:block_size]
+            )
         for block in self.transformer.h:
             if hasattr(block.attn, "bias"):
                 block.attn.bias = block.attn.bias[:, :, :block_size, :block_size]
@@ -348,16 +423,17 @@ class GPT(nn.Module):
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
-        # extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = AnyPrecisionAdamW(
+        extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = torch.optim.AdamW(
             optim_groups,
             lr=learning_rate,
             betas=betas,
             # momentum_dtype=
-            # **extra_args
+            **extra_args,
         )
-        print(f"using AnyPrecision var_bf16 AdamW")
-        # print(f"using fused AdamW? : {use_fused}")
+        # print(f"using AdaMetaR optimizer")
+        # print(f"using AnyPrecision var_bf16 AdamW")
+        print(f"using fused AdamW? : {use_fused}")
 
         return optimizer
 

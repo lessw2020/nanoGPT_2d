@@ -1,9 +1,10 @@
 # code for AdaMetaR.  This is from:
-https://github.com/Chernyn/Admeta-Optimizer/tree/master
+# https://github.com/Chernyn/Admeta-Optimizer/tree/master
 
 import torch
 import torch.nn as nn
 from torch.optim import Optimizer
+import math
 
 
 class AdmetaR(Optimizer):
