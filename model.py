@@ -61,67 +61,7 @@ class CausalSelfAttention(nn.Module):
             print(
                 "WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0"
             )
-            # ====  Add Alibi ========
-            attn_mask = self.get_causal_mask(config.block_size).repeat(
-                config.n_head, 1, 1
-            )
-            # print(f"{attn_mask=}")
-            attn_mask += self.get_alibi_mask(self.n_head, config.block_size)
-            self.register_buffer("attn_mask", attn_mask, persistent=False)
-            # causal mask to ensure that attention is only applied to the left in the input sequence
-            # self.register_buffer(
-            #     "bias",
-            #     torch.tril(torch.ones(config.block_size, config.block_size)).view(
-            #         1, 1, config.block_size, config.block_size
-            #     ),
-            # )
             self.alibi = alibi  # AlibiPE(config.block_size, self.n_head)
-            assert torch.allclose(
-                self.attn_mask, self.alibi.alibi_mask
-            ), f"mask mismath"
-
-    @classmethod
-    def get_causal_mask(cls, N):
-        causal_mask = torch.ones(N, N).tril()
-        causal_mask = causal_mask.masked_fill(causal_mask == 0, -float("inf"))
-        return causal_mask
-
-    @classmethod
-    def get_alibi_slopes(cls, n):
-        """
-        Compute ALiBi slopes for a given number of heads. Adopted from
-        https://github.com/ofirpress/attention_with_linear_biases.
-        """
-
-        def get_slopes_power_of_2(n):
-            start = 2 ** (-(2 ** -(math.log2(n) - 3)))
-            ratio = start
-            return [start * ratio**i for i in range(n)]
-
-        if math.log2(n).is_integer():
-            return get_slopes_power_of_2(
-                n
-            )  # In the paper, we only train models that have 2^a heads for some a. This function has
-        else:  # some good properties that only occur when the input is a power of 2. To maintain that even
-            closest_power_of_2 = 2 ** math.floor(
-                math.log2(n)
-            )  # when the number of heads is not a power of 2, we use this workaround.
-            return (
-                get_slopes_power_of_2(closest_power_of_2)
-                + cls.get_alibi_slopes(2 * closest_power_of_2)[0::2][
-                    : n - closest_power_of_2
-                ]
-            )
-
-    @classmethod
-    def get_alibi_mask(cls, num_heads, N):
-        distance_matrix = torch.arange(N) - torch.arange(N).view(-1, 1)
-        scalars = torch.tensor(cls.get_alibi_slopes(num_heads))
-        alibi_mask = distance_matrix * scalars.view(
-            -1, 1, 1
-        )  # (N,N) * (nh, 1, 1) -> (nh, N,N)
-        print(f"alibi mask generated = {alibi_mask.shape=}")
-        return alibi_mask
 
     def forward(self, x):
         (
@@ -130,10 +70,8 @@ class CausalSelfAttention(nn.Module):
             C,
         ) = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
-        # attn_mask = self.attn_mask[:, :T, :T]  # (nh, T, T)
         alibi_mask = self.alibi.get_attention_mask(T)
-        # assert attn_mask == alibi_mask, f"current batch size mismatch for alibi"
-        # print(f"{alibi_mask[0][2]=}")
+
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(
