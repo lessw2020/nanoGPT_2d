@@ -23,6 +23,8 @@ from layers.sigma_reparam import SigmaLinear
 from optimizers.anyprecision import AnyPrecisionAdamW
 from optimizers.adameta import AdmetaR
 
+from alibi_embeddings import AlibiPE
+
 
 class LayerNorm(nn.Module):
     """LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False"""
@@ -37,7 +39,7 @@ class LayerNorm(nn.Module):
 
 
 class CausalSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, alibi):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
@@ -63,8 +65,8 @@ class CausalSelfAttention(nn.Module):
             attn_mask = self.get_causal_mask(config.block_size).repeat(
                 config.n_head, 1, 1
             )
-            print(f"{attn_mask=}")
-            attn_mask = self.get_alibi_mask(self.n_head, config.block_size)
+            # print(f"{attn_mask=}")
+            attn_mask += self.get_alibi_mask(self.n_head, config.block_size)
             self.register_buffer("attn_mask", attn_mask, persistent=False)
             # causal mask to ensure that attention is only applied to the left in the input sequence
             # self.register_buffer(
@@ -73,6 +75,10 @@ class CausalSelfAttention(nn.Module):
             #         1, 1, config.block_size, config.block_size
             #     ),
             # )
+            self.alibi = alibi  # AlibiPE(config.block_size, self.n_head)
+            assert torch.allclose(
+                self.attn_mask, self.alibi.alibi_mask
+            ), f"mask mismath"
 
     @classmethod
     def get_causal_mask(cls, N):
@@ -124,7 +130,10 @@ class CausalSelfAttention(nn.Module):
             C,
         ) = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
-        attn_mask = self.attn_mask[:, :T, :T]  # (nh, T, T)
+        # attn_mask = self.attn_mask[:, :T, :T]  # (nh, T, T)
+        alibi_mask = self.alibi.get_attention_mask(T)
+        # assert attn_mask == alibi_mask, f"current batch size mismatch for alibi"
+        # print(f"{alibi_mask[0][2]=}")
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(
@@ -155,8 +164,9 @@ class CausalSelfAttention(nn.Module):
             att = q @ k.transpose(
                 -2, -1
             )  # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-            att += attn_mask  # (B, nh, T, T) + (nh, T, T) -> (B, nh, T, T)
-            att *= 1.0 / math.sqrt(T)
+            # (B, nh, T, T) + (nh, T, T) -> (B, nh, T, T)
+            att *= 1.0 / math.sqrt(k.size(-1))
+            att += alibi_mask
 
             att = F.softmax(att, dim=-1)
             # att = self.attn_dropout(att)
@@ -189,10 +199,10 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, alibi):
         super().__init__()
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
-        self.attn = CausalSelfAttention(config)
+        self.attn = CausalSelfAttention(config, alibi)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
@@ -220,7 +230,7 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
         self.using_alibi = True
-
+        self.alibi = AlibiPE(config.block_size, config.n_head)
         self.transformer = nn.ModuleDict(
             dict(
                 wte=torch.nn.Embedding(config.vocab_size, config.n_embd),
@@ -228,7 +238,9 @@ class GPT(nn.Module):
                 if not self.using_alibi
                 else None,
                 drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                h=nn.ModuleList(
+                    [Block(config, self.alibi) for _ in range(config.n_layer)]
+                ),
                 ln_f=LayerNorm(config.n_embd, bias=config.bias),
             )
         )
