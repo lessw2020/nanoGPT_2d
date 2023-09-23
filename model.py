@@ -132,11 +132,15 @@ class CausalSelfAttention(nn.Module):
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         qkv = self.c_attn(x).split(self.n_embd // self.tp_size, dim=2)
-        for item in qkv:
-            item = item.view(B, T, self.tp_num_heads, channel_head_size).transpose(
-                1, 2
-            )  # ==>  (B, nh, T, hs)
-        q, k, v = qkv
+        
+        qkv = self.c_attn(x).view(B, T, 3, self.tp_num_heads, channel_head_size)
+        qkv = qkv.transpose(1, 3)  # (B, nh, 3, T, hs)
+
+        # Slicing
+        q = qkv[:, :, 0]  # (B, nh, T, hs)
+        k = qkv[:, :, 1]  # (B, nh, T, hs)
+        v = qkv[:, :, 2]  # (B, nh, T, hs)
+        
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:

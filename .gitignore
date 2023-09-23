@@ -3,3 +3,4 @@ out-shakespeare-char/
 *.pth
 *.pyc
 *.json
+*.out
