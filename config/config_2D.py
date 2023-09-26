@@ -22,23 +22,23 @@ import torch.distributed as dist
 @dataclass
 class train_config(base_config):
     # current models = "10.5M", "124M", "201M", "1B", "1.5B"
-    model_name: str = "1B"
-    use_tensor_parallel: bool = False
+    model_name: str = "124M"
+    use_tensor_parallel: bool = True
 
     dataset = "openwebtext"  # options = shakespeare_char, openwebtext
     data_dir = "data"
 
     iters_to_run: int = 8
 
-    batch_size = 6
+    batch_size = 8
 
-    block_size = 1024  # 256  # 1024 = gpt2, openwebtext, context of up to 256 previous characters
+    block_size = 2048  # 256  # 1024 = gpt2, openwebtext, context of up to 256 previous characters
     use_bias: bool = False  # use bias in linear layers (recommend No)
     vocab_size: int = 50304  # use 65 for shakespeare, GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     dropout: float = 0.0
 
     # Calc TFlops
-    use_flop_counter: bool = True
+    use_flop_counter: bool = False
 
     # FSDP specific
     use_rate_limiter: bool = True
@@ -79,7 +79,7 @@ def build_model(cfg, tp_mesh=None, rank=None):
         # block_size: int = 1024
         # vocab_size: int = 50304  # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
         n_layer: int = 12
-        n_head: int = 12
+        n_head: int = 16
         n_embd: int = 768
 
     elif model_name == "201M":
@@ -93,7 +93,7 @@ def build_model(cfg, tp_mesh=None, rank=None):
         n_embd: int = 1280
 
     elif model_name == "1.5B":
-        n_layer: int = 46
+        n_layer: int = 32
         n_head: int = 20
         n_embd: int = 1600
 

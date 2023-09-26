@@ -32,6 +32,9 @@ from torch.distributed._tensor import (
     Shard,
 )
 
+from softmax import softmax_eager, softmax_triton
+from softmax_autograd import triton_softmax
+from fused_softmax import fused_softmax
 
 @dataclass
 class GPTConfig:
@@ -108,10 +111,11 @@ class CausalSelfAttention(nn.Module):
             hasattr(torch.nn.functional, "scaled_dot_product_attention")
             and self.dropout == 0.0
         )
+        
         if not self.flash:
-            print(
-                "WARNING: using slow attention. Flash Attention atm needs PyTorch nightly and dropout=0.0"
-            )
+            # print(
+            #    "WARNING: using slow attention. Flash Attention atm needs PyTorch nightly and dropout=0.0"
+            #)
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer(
                 "bias",
@@ -152,7 +156,10 @@ class CausalSelfAttention(nn.Module):
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
-            att = F.softmax(att, dim=-1)
+
+            #att = F.softmax(att, dim=-1)
+            att = fused_softmax(att)
+            # att = softmax_triton(att)
             att = self.attn_dropout(att)
             y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
 
