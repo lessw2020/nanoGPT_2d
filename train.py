@@ -285,13 +285,13 @@ from torch.distributed._tensor import DeviceMesh
 # ======================= Sharding ==========================
 
 wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
-model_sharding_strategy = ShardingStrategy. HYBRID_SHARD  # or _HYBRID_SHARD_ZERO2 
+model_sharding_strategy = ShardingStrategy.HYBRID_SHARD  # or _HYBRID_SHARD_ZERO2 
 
 _world_size = dist.get_world_size()
 
 rank_print(f"{model_sharding_strategy=}")
 rank_print(f"{_world_size=}")
-use_ssdp: bool = True
+use_ssdp: bool = False
 scaling_group_size = 2  # how many gpus 
 # ============================================================
 '''
@@ -308,7 +308,39 @@ assert (
     _world_size // node_size == 2
 ), f"world size of {_world_size=} is not evenly divisible by {node_size=} to yield two mini-nodes"
 '''
+
 # =========  Create Device Mesh to allocate scaling groups ==================
+from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor, mesh_resources, Replicate, Shard
+from torch.distributed._tensor.device_mesh import init_device_mesh
+
+scaling_group_size = 2  # Model is sharded across this dimension
+replica_groups = 4 # How many model replicas, where each replica is scaling_group_size gpus...
+
+mesh_ssdp = init_device_mesh('cuda', (replica_groups, scaling_group_size),
+                             mesh_dim_names=('replica_groups', 'scaling_group_size'))
+
+rank_print(f"{mesh_ssdp=}")
+rank_print(f"{mesh_ssdp.mesh_dim_names=}")
+dist.barrier()
+
+model = FSDP(
+        model,
+        # obsolete - process_group=(shard_group, replicate_group),
+        device_mesh=mesh_ssdp,
+        auto_wrap_policy=wrapping_policy,
+        # mixed_precision=mp_policy,
+        # sharding_strategy=model_sharding_strategy,
+        sharding_strategy=model_sharding_strategy, # ShardingStrategy.HYBRID_SHARD,  # or ShardingStrategy._HYBRID_SHARD_ZERO2
+        # backward_prefetch=backward_policy,
+        device_id=torch.cuda.current_device(),  # streaming init
+        # limit_all_gathers=cfg.use_rate_limiter,
+        use_orig_params=True,
+    )
+
+
+
+'''
 mesh_list = []
 dmesh = torch.arange(0, _world_size).view(-1, scaling_group_size)
 for i, sg in enumerate(dmesh):
@@ -327,7 +359,7 @@ replicate_group, shard_group = mesh_groups[0], mesh_groups[1]
 rank_print(f"{replicate_group=}, {shard_group=}")
 
 rank_print(dist.get_world_size(replicate_group), dist.get_world_size(shard_group))
- 
+'''
 # ======= End Device Mesh ======================
 
 # ======= Initialize FSDP with Scaling groups, and verify ===========
@@ -336,7 +368,8 @@ if ddp and not _compiled_fsdp:
     # model = DDP(model, device_ids=[ddp_local_rank])
     model = FSDP(
         model,
-        process_group=(shard_group, replicate_group),
+        # process_group=(shard_group, replicate_group),
+        device_mesh=mesh_ssdp,
         # process_group=(pg1, pg2),
         auto_wrap_policy=wrapping_policy,
         # mixed_precision=mp_policy,
@@ -350,8 +383,9 @@ if ddp and not _compiled_fsdp:
 
     shard_g = model.process_group
     replicate_g = model._inter_node_state.process_group
-    assert shard_g == shard_group
-    assert replicate_g == replicate_group
+    rank_print(f"{mesh_ssdp.mesh[0]=}, {mesh_ssdp.mesh[1]=} ")
+    #assert replicate_g == mesh_ssdp.mesh[0]
+    #assert shard_g == mesh_ssdp.mesh[1]
 #assert False, "sstop"
 # optimizer
 optimizer = model.configure_optimizers(
