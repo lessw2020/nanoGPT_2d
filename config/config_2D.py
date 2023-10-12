@@ -24,6 +24,7 @@ class train_config(base_config):
     # current models = "10.5M", "124M", "201M", "1B", "1.5B"
     model_name: str = "124M"
     use_tensor_parallel: bool = True
+    use_compile: bool = True
 
     dataset = "openwebtext"  # options = shakespeare_char, openwebtext
     data_dir = "data"
