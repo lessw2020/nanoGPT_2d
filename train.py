@@ -50,8 +50,8 @@ batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch si
 block_size = 1024
 # model
 n_layer = 12
-n_head = 12
-n_embd = 768
+n_head = 16
+n_embd = 1024
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
@@ -98,8 +98,13 @@ else:
     master_process = True
     seed_offset = 0
     ddp_world_size = 1
+
+def rank_print(msg):
+    if ddp_local_rank ==0:
+        print(f"{msg}")
+
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
-print(f"tokens per iteration will be: {tokens_per_iter:,}")
+rank_print(f"tokens per iteration will be: {tokens_per_iter:,}")
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
@@ -109,7 +114,13 @@ torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+
+use_ddp_mp = True
+
+if use_ddp_mp:
+    ctx = nullcontext() 
+else:
+    ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 # poor man's data loader
 data_dir = os.path.join('data', dataset)
@@ -145,10 +156,10 @@ model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=bloc
                   bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
 if init_from == 'scratch':
     # init a new model from scratch
-    print("Initializing a new model from scratch")
+    rank_print("Initializing a new model from scratch")
     # determine the vocab size we'll use for from-scratch training
     if meta_vocab_size is None:
-        print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
+        rank_print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
     model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
     gptconf = GPTConfig(**model_args)
     model = GPT(gptconf)
@@ -199,14 +210,26 @@ if init_from == 'resume':
 checkpoint = None # free up memory
 
 # compile the model
+compile = False
 if compile:
-    print("compiling the model... (takes a ~minute)")
+    rank_print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model) # requires PyTorch 2.0
 
 # wrap model into DDP container
+from torch.nn.parallel.distributed import _MixedPrecision
+bf16_policy = _MixedPrecision(
+    param_dtype = torch.bfloat16,
+    reduce_dtype = torch.bfloat16,
+    buffer_dtype = torch.bfloat16, 
+)
+
 if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
+    if use_ddp_mp:
+        model = DDP(model, device_ids=[ddp_local_rank], mixed_precision=bf16_policy)
+    else:
+        model = DDP(model, device_ids=[ddp_local_rank])
+
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -244,7 +267,7 @@ if wandb_log and master_process:
     #wandb.init(project=wandb_project, name=wandb_run_name, config=config)
     pass
 
-max_iters = 8
+max_iters = 12
 
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
@@ -273,7 +296,7 @@ while True:
             })
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
-            if iter_num > 0:
+            if iter_num > 100:
                 checkpoint = {
                     'model': raw_model.state_dict(),
                     'optimizer': optimizer.state_dict(),
@@ -282,7 +305,7 @@ while True:
                     'best_val_loss': best_val_loss,
                     'config': config,
                 }
-                print(f"saving checkpoint to {out_dir}")
+                rank_print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
     if iter_num == 0 and eval_only:
         break
@@ -333,4 +356,8 @@ while True:
         break
 
 if ddp:
+    if use_ddp_mp:
+        rank_print(f"Run with DDP MP ")
+    else:
+        rank_print(f"Run with torch autocast")
     destroy_process_group()
