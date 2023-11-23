@@ -98,6 +98,8 @@ class AnyPrecisionAdamW(Optimizer):
             momentum_dtype = group["momentum_dtype"]
             variance_dtype = group["variance_dtype"]
             compensation_buffer_dtype = group["compensation_buffer_dtype"]
+            use_numerical_guarantee = group['use_numerical_guarantee']
+
 
             for p in group["params"]:
                 if p.grad is None:
@@ -141,8 +143,7 @@ class AnyPrecisionAdamW(Optimizer):
 
                 exp_avg = state["exp_avg"]
                 exp_avg_sq = state["exp_avg_sq"]
-                use_numerical_guarantee = state['use_numerical_guarantee']
-
+                
                 grad = p.grad
 
                 # weight decay, AdamW style

@@ -48,7 +48,7 @@ from torch.distributed.fsdp.wrap import (
 
 # -------   Settings ------------
 
-_use_torch_compile = False
+_use_torch_compile = True
 
 
 # -----------------------------------------------------------------------------
@@ -62,31 +62,31 @@ eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
-wandb_log = False # disabled by default
-wandb_project = 'owt-h100-runs'
-wandb_run_name = 'gpt2-fsdp-base' # 'run' + str(time.time())
+wandb_log = True # disabled by default
+wandb_project = 'owt-a100-runs'
+wandb_run_name = 'gpt2-fsdp-NumGuarantee' # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
 gradient_accumulation_steps = 1 # 5 * 8 # used to simulate larger batch sizes
 batch_size = 24 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
-n_layer = 16
+n_layer = 20
 n_head = 16
 n_embd = 1024
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
-max_iters = 600000 # total number of training iterations
+max_iters = 6000 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
-warmup_iters = 2000 # how many steps to warm up for
-lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
+warmup_iters = 200 # how many steps to warm up for
+lr_decay_iters = 6000 # should be ~= max_iters per Chinchilla
 min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
@@ -217,6 +217,7 @@ elif init_from.startswith('gpt2'):
 if block_size < model.config.block_size:
     model.crop_block_size(block_size)
     model_args['block_size'] = block_size # so that the checkpoint will have the right value
+
 model.to(device)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
