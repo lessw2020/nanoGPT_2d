@@ -31,7 +31,9 @@ from model import GPTConfig, GPT
 
 from gpu_memory import Memory_Maximizer
 
-
+torch._dynamo.config.optimize_ddp=False
+torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint = True
+#torch._dynamo.config.allow_non_fake_inputs=True
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
@@ -43,7 +45,7 @@ eval_only = False  # if True, script exits right after the first eval
 always_save_checkpoint = False  # if True, always save a checkpoint after each eval
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
-wandb_log = True  # disabled by default
+wandb_log = False  # disabled by default
 wandb_project = "owt_basic"
 wandb_run_name = "gpt2-AnyPrecision_fp16"  # 'run' + str(time.time())
 # data
@@ -61,7 +63,7 @@ bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
 
-max_iters = 6000  # total number of training iterations
+max_iters = 50  # total number of training iterations
 
 weight_decay = 1e-1
 beta1 = 0.95  # 0.9
@@ -96,6 +98,7 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 
 # various inits, derived attributes, I/O setup
 ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
+
 if ddp:
     init_process_group(backend=backend)
     ddp_rank = int(os.environ["RANK"])
