@@ -29,6 +29,28 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
 
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    CPUOffload,
+    MixedPrecision,
+    BackwardPrefetch,
+    ShardingStrategy,
+    FullStateDictConfig,
+    StateDictType,
+)
+
+
+from torch.distributed.fsdp.wrap import (
+    transformer_auto_wrap_policy,
+    enable_wrap,
+    wrap,
+)
+
+# -------   Settings ------------
+
+_use_torch_compile = False
+
+
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
@@ -41,17 +63,17 @@ always_save_checkpoint = True # if True, always save a checkpoint after each eva
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = False # disabled by default
-wandb_project = 'owt'
-wandb_run_name = 'gpt2' # 'run' + str(time.time())
+wandb_project = 'owt-h100-runs'
+wandb_run_name = 'gpt2-fsdp-base' # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
-gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
-batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch size
+gradient_accumulation_steps = 1 # 5 * 8 # used to simulate larger batch sizes
+batch_size = 24 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
-n_layer = 12
-n_head = 12
-n_embd = 768
+n_layer = 16
+n_head = 16
+n_embd = 1024
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
@@ -71,7 +93,7 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-compile = True # use PyTorch 2.0 to compile the model to be faster
+compile = _use_torch_compile # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -84,6 +106,7 @@ if ddp:
     init_process_group(backend=backend)
     ddp_rank = int(os.environ['RANK'])
     ddp_local_rank = int(os.environ['LOCAL_RANK'])
+    _rank = ddp_local_rank
     ddp_world_size = int(os.environ['WORLD_SIZE'])
     device = f'cuda:{ddp_local_rank}'
     torch.cuda.set_device(device)
@@ -91,8 +114,8 @@ if ddp:
     seed_offset = ddp_rank # each process gets a different seed
     # world_size number of processes will be training simultaneously, so we can scale
     # down the desired gradient accumulation iterations per process proportionally
-    assert gradient_accumulation_steps % ddp_world_size == 0
-    gradient_accumulation_steps //= ddp_world_size
+    # assert gradient_accumulation_steps % ddp_world_size == 0
+    # gradient_accumulation_steps //= ddp_world_size
 else:
     # if not ddp, we are running on a single gpu, and one process
     master_process = True
@@ -100,6 +123,13 @@ else:
     ddp_world_size = 1
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
 print(f"tokens per iteration will be: {tokens_per_iter:,}")
+
+# wrapper to avoid cluttering with if rank==0...
+def rank_print(*argv):
+    if _rank == 0:
+        for item in argv:
+            print(item)
+
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
@@ -109,7 +139,7 @@ torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+ctx = nullcontext() # if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 # poor man's data loader
 data_dir = os.path.join('data', dataset)
@@ -204,9 +234,59 @@ if compile:
     unoptimized_model = model
     model = torch.compile(model) # requires PyTorch 2.0
 
+# wrap model into FSDP container
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from model import CausalSelfAttention, MLP
+from torch.distributed.fsdp import (
+    ShardingStrategy,
+)
+
+# from torch.distributed.fsdp._init_utils import _init_inter_node_process_group
+import torch.distributed as dist
+from torch.distributed._tensor import DeviceMesh
+
+# ======================= Sharding ==========================
+
+wrapping_policy = ModuleWrapPolicy({CausalSelfAttention, MLP})
+model_sharding_strategy = ShardingStrategy.FULL_SHARD  # or _HYBRID_SHARD_ZERO2
+
+from torch.distributed.fsdp import (
+    MixedPrecision,
+)
+
+# requires grad scaler in main loop
+fp16_policy = MixedPrecision(
+    param_dtype=torch.float16,
+    # Gradient communication precision.
+    reduce_dtype=torch.float16,
+    # Buffer precision.
+    buffer_dtype=torch.float16,
+)
+
+bf16_policy = MixedPrecision(
+    param_dtype=torch.bfloat16,
+    # Gradient communication precision.
+    reduce_dtype=torch.bfloat16,
+    # Buffer precision.
+    buffer_dtype=torch.bfloat16,
+)
+mp_policy = bf16_policy
+
 # wrap model into DDP container
+ddp=False
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
+else:
+    model = FSDP(model, auto_wrap_policy=wrapping_policy,
+        mixed_precision=mp_policy,
+        sharding_strategy=model_sharding_strategy, # ShardingStrategy.HYBRID_SHARD,  # or ShardingStrategy._HYBRID_SHARD_ZERO2
+        # backward_prefetch=backward_policy,
+        device_id=torch.cuda.current_device(),  # streaming init
+        # limit_all_gathers=cfg.use_rate_limiter,
+        use_orig_params=True,
+
+)
+
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -286,20 +366,20 @@ while True:
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
-    for micro_step in range(gradient_accumulation_steps):
-        if ddp:
+    # for micro_step in range(gradient_accumulation_steps):
+        # if ddp:
             # in DDP training we only need to sync gradients at the last micro step.
             # the official way to do this is with model.no_sync() context manager, but
             # I really dislike that this bloats the code and forces us to repeat code
             # looking at the source of that context manager, it just toggles this variable
-            model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
-        with ctx:
-            logits, loss = model(X, Y)
-            loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
+        #    model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
+        #with ctx:
+    logits, loss = model(X, Y)
+    loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = get_batch('train')
+    X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
+    scaler.scale(loss).backward()
     # clip the gradient
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
