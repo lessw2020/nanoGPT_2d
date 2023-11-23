@@ -163,29 +163,30 @@ class AnyPrecisionAdamW(Optimizer):
 
                 # adjust using bias2
                 denom_correction = (1 - beta2**step) ** 0.5  # avoids math import
-
-                centered_variance = (exp_avg_sq.sqrt() / denom_correction).add_(
-                    eps, alpha=1
+                
+                #if not use_numerical_guarantee:
+                centered_variance = exp_avg_sq.sqrt() / denom_correction.add_(
+                    1e-12, alpha=1
                 )
+
                 if use_numerical_guarantee:
-                    safe_variance = torch.clamp(centered_variance, min=1e-5)
+                #    denom_max = max(denom_correction, eps)
+                #    centered_variance = exp_avg_sq.sqrt() / denom_max
+                
+                    safe_variance = torch.clamp(centered_variance, min=1e-7)
                     safe_variance = safe_variance.sqrt()
 
                 # lr update to compensation
                 if use_kahan_summation:
                     compensation = state["compensation"]
-
                     compensation.addcdiv_(exp_avg, centered_variance, value=-step_size)
-
                     # update weights with compensation (Kahan summation)
                     # save error back to compensation for next iteration
                     temp_buffer = p.detach().clone()
                     p.data.add_(compensation)
                     compensation.add_(temp_buffer.sub_(p.data))
 
+                elif use_numerical_guarantee:
+                    p.data.addcdiv_(exp_avg, safe_variance, value=-step_size)
                 else:
-                    # usual AdamW updates
-                    if use_numerical_guarantee:
-                        p.data.addcdiv_(exp_avg, safe_variance, value=-step_size)
-                    else:
-                        p.data.addcdiv_(exp_avg, centered_variance, value=-step_size)
+                    p.data.addcdiv_(exp_avg, centered_variance, value=-step_size)

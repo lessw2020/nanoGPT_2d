@@ -12,3 +12,4 @@ input.txt
 *.log
 *.wandb
 *.yaml
+*.txt
