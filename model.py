@@ -373,17 +373,18 @@ class GPT(nn.Module):
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
-        extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(
+        # extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = AnyPrecisionAdamW(
             optim_groups,
             lr=learning_rate,
             betas=betas,
-            # momentum_dtype=
-            **extra_args,
+            variance_dtype=torch.float16,
+            momentum_dtype=torch.float16,
+            # **extra_args,
         )
         # print(f"using AdaMetaR optimizer")
-        # print(f"using AnyPrecision var_bf16 AdamW")
-        print(f"using fused AdamW? : {use_fused}")
+        print(f"using AnyPrecision fp16 AdamW")
+        # print(f"using fused AdamW? : {use_fused}")
 
         return optimizer
 

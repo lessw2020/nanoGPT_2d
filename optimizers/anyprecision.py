@@ -23,10 +23,12 @@ class AnyPrecisionAdamW(Optimizer):
         lr=1e-3,
         betas=(0.9, 0.999),
         eps=1e-8,
+        eps2=1e-5,
         weight_decay=0.0,
-        use_kahan_summation=True,
-        momentum_dtype=torch.bfloat16,
-        variance_dtype=torch.bfloat16,
+        use_kahan_summation=False,
+        use_numerical_guarantee: bool = True,
+        momentum_dtype=torch.float16,
+        variance_dtype=torch.float16,
         compensation_buffer_dtype=torch.bfloat16,
     ):
         """
@@ -163,6 +165,9 @@ class AnyPrecisionAdamW(Optimizer):
                     eps, alpha=1
                 )
 
+                safe_variance = torch.clamp(centered_variance, min=1e-5)
+                safe_variance = safe_variance.sqrt()
+
                 # lr update to compensation
                 if use_kahan_summation:
                     compensation = state["compensation"]
@@ -177,4 +182,4 @@ class AnyPrecisionAdamW(Optimizer):
 
                 else:
                     # usual AdamW updates
-                    p.data.addcdiv_(exp_avg, centered_variance, value=-step_size)
+                    p.data.addcdiv_(exp_avg, safe_variance, value=-step_size)

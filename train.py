@@ -45,7 +45,7 @@ init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = True  # disabled by default
 wandb_project = "owt_basic"
-wandb_run_name = "gpt2-Alibi_postScaling"  # 'run' + str(time.time())
+wandb_run_name = "gpt2-AnyPrecision_fp16"  # 'run' + str(time.time())
 # data
 dataset = "openwebtext"
 gradient_accumulation_steps = 5 * 8  # used to simulate larger batch sizes
