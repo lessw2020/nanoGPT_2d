@@ -107,6 +107,8 @@ if is_distributed:
     device_module.set_device(device)
     init_distributed()  # initialize torch.distributed
     logger.info(f"distributed initialized, device: {device}")
+    _rank = int(os.environ["RANK"])
+master_process = _rank == 0
 
 
 """if ddp:
@@ -132,14 +134,16 @@ gradient_accumulation_steps = 1
 
 tokens_per_iter = gradient_accumulation_steps * world_size * batch_size * block_size
 logger.info(f"tokens per iteration will be: {tokens_per_iter:,}")
-assert False, "stop here"
+
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
-torch.manual_seed(1337 + seed_offset)
+torch.manual_seed(1337 + _rank)
 torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
-device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
+device_type = (
+    "cuda"  # if "cuda" in device else "cpu"  # for later use in torch.autocast
+)
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {
     "float32": torch.float32,
@@ -194,7 +198,7 @@ if os.path.exists(meta_path):
     with open(meta_path, "rb") as f:
         meta = pickle.load(f)
     meta_vocab_size = meta["vocab_size"]
-    print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+    logger.info(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
 # model init
 model_args = dict(
@@ -268,14 +272,17 @@ if init_from == "resume":
 checkpoint = None  # free up memory
 
 # compile the model
-if compile:
+"""if compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
-
+"""
 # wrap model into DDP container
-if ddp:
+"""if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
+"""
+# apply FSDP2 to the model
+assert False, "stop here"
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
