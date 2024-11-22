@@ -107,7 +107,7 @@ if is_distributed:
     device_module.set_device(device)
     init_distributed()  # initialize torch.distributed
     logger.info(f"distributed initialized, device: {device}")
-    assert False, "stop here"
+
 
 """if ddp:
     init_process_group(backend=backend)
@@ -128,9 +128,11 @@ else:
     seed_offset = 0
     ddp_world_size = 1
 """
+gradient_accumulation_steps = 1
 
-tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
-print(f"tokens per iteration will be: {tokens_per_iter:,}")
+tokens_per_iter = gradient_accumulation_steps * world_size * batch_size * block_size
+logger.info(f"tokens per iteration will be: {tokens_per_iter:,}")
+assert False, "stop here"
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
