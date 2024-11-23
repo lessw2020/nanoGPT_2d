@@ -290,10 +290,9 @@ scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 # apply FSDP2 to the model
 parallelize_nanogpt(model, world_mesh, parallel_dims)  # todo - configs
 
-model._init_weights()
+model._init_weights(model)
 model.train()
 
-assert False, "stop here"
 
 # optimizer must be built after FSDP2
 optimizer = model.configure_optimizers(
@@ -346,7 +345,7 @@ if wandb_log and master_process:
 X, Y = get_batch("train")  # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
-raw_model = model.module if ddp else model  # unwrap DDP container if needed
+raw_model = model  # unwrap DDP container if needed
 running_mfu = -1.0
 while True:
 
@@ -387,6 +386,13 @@ while True:
     if iter_num == 0 and eval_only:
         break
 
+    logits, loss = model(X, Y)
+    X, Y = get_batch("train")  # fetch the next batch
+    # todo - clip norm
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    """
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
@@ -416,7 +422,7 @@ while True:
     scaler.update()
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
-
+    """
     # timing and logging
     t1 = time.time()
     dt = t1 - t0
