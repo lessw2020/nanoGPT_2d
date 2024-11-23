@@ -86,11 +86,13 @@ def apply_fsdp(
     mp_policy = MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=reduce_dtype)
     fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
 
-    for layer_id, transformer_block in model.layers.items():
-
+    for layer_id, transformer_block in enumerate(
+        model.transformer.h
+    ):  # layers.items():
+        print(f"Applying FSDP to layer {layer_id}, {transformer_block}")
         # As an optimization, do not reshard after forward for the last
         # transformer block since FSDP would prefetch it immediately
-        reshard_after_forward = int(layer_id) < len(model.layers) - 1
+        reshard_after_forward = int(layer_id) < len(model.transformer.h) - 1
         fully_shard(
             transformer_block,
             **fsdp_config,
