@@ -24,10 +24,10 @@ from contextlib import nullcontext
 
 import numpy as np
 import torch
+from fsdp_parallelize import parallelize_nanogpt
 
 from fsdp_utils import device_module, device_type, init_distributed
 from logging_utils import SingletonLogger
-
 from model import GPT, GPTConfig
 from parallel_dims import ParallelDims
 from torch.distributed import destroy_process_group, init_process_group
@@ -92,24 +92,34 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 
 # various inits, derived attributes, I/O setup
 is_distributed = int(os.environ.get("RANK", -1)) != -1  # is this a distributed run?
-if is_distributed:
-    world_size = int(os.environ["WORLD_SIZE"])
-    parallel_dims = ParallelDims(
-        dp_shard=-1,
-        dp_replicate=1,  # job_config.training.data_parallel_replicate_degree,
-        cp=1,  # job_config.experimental.context_parallel_degree,
-        tp=1,  # job_config.training.tensor_parallel_degree,
-        pp=1,  # job_config.experimental.pipeline_parallel_degree,
-        world_size=world_size,
-        enable_loss_parallel=False,
-    )
-    device = torch.device(f"{device_type}:{int(os.environ['LOCAL_RANK'])}")
-    device_module.set_device(device)
-    init_distributed()  # initialize torch.distributed
-    logger.info(f"distributed initialized, device: {device}")
-    _rank = int(os.environ["RANK"])
+if not is_distributed:
+    # we are not handling this case atm
+    raise NotImplementedError("Non-distributed training is not supported yet.")
+# if is_distributed:
+world_size = int(os.environ["WORLD_SIZE"])
+parallel_dims = ParallelDims(
+    dp_shard=-1,
+    dp_replicate=1,  # job_config.training.data_parallel_replicate_degree,
+    cp=1,  # job_config.experimental.context_parallel_degree,
+    tp=1,  # job_config.training.tensor_parallel_degree,
+    pp=1,  # job_config.experimental.pipeline_parallel_degree,
+    world_size=world_size,
+    enable_loss_parallel=False,
+)
+device = torch.device(f"{device_type}:{int(os.environ['LOCAL_RANK'])}")
+device_module.set_device(device)
+init_distributed()  # initialize torch.distributed
+logger.info(f"distributed initialized, device: {device}")
+_rank = int(os.environ["RANK"])
 master_process = _rank == 0
-
+# build meshes
+world_mesh = parallel_dims.build_mesh(device_type=device_type)
+if parallel_dims.dp_enabled:
+    dp_mesh = world_mesh["dp"]
+    dp_degree, dp_rank = dp_mesh.size(), dp_mesh.get_local_rank()
+else:
+    dp_degree, dp_rank = 1, 0
+logger.info(f"{world_mesh=}, dp_degree: {dp_degree}, dp_rank: {dp_rank}")
 
 """if ddp:
     init_process_group(backend=backend)
@@ -263,13 +273,6 @@ model.to(device)
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 
-# optimizer
-optimizer = model.configure_optimizers(
-    weight_decay, learning_rate, (beta1, beta2), device_type
-)
-if init_from == "resume":
-    optimizer.load_state_dict(checkpoint["optimizer"])
-checkpoint = None  # free up memory
 
 # compile the model
 """if compile:
@@ -282,7 +285,20 @@ checkpoint = None  # free up memory
     model = DDP(model, device_ids=[ddp_local_rank])
 """
 # apply FSDP2 to the model
+parallelize_nanogpt(model, world_mesh, parallel_dims)  # todo - configs
+
+model._init_weights()
+model.train()
+
 assert False, "stop here"
+
+# optimizer must be built after FSDP2
+optimizer = model.configure_optimizers(
+    weight_decay, learning_rate, (beta1, beta2), device_type
+)
+if init_from == "resume":
+    optimizer.load_state_dict(checkpoint["optimizer"])
+checkpoint = None  # free up memory
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches

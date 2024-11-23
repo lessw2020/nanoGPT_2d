@@ -11,6 +11,7 @@ from collections import defaultdict
 
 import torch
 import torch.nn as nn
+from parallel_dims import ParallelDims
 
 from torch.distributed import DeviceMesh
 from torch.distributed._composable.fsdp import (
