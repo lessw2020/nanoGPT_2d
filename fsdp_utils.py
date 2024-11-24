@@ -84,7 +84,7 @@ def get_peak_flops(device_name: str = None) -> int:
         )  # default device_module:torch.cuda
         device = torch.device("cuda")  # device object
         device_name = device_module.get_device_name(device)
-        print(f"Using {device_name} for MFU calculations")
+    print(f"Using {device_name} for MFU calculations")
 
     if "A100" in device_name:
         # data from https://www.nvidia.com/en-us/data-center/a100/

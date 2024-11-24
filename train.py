@@ -62,14 +62,14 @@ dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
-max_iters = 200  # 600000 # total number of training iterations
+max_iters = 50  # 600000 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True  # whether to decay the learning rate
-warmup_iters = 100  # 2000 # how many steps to warm up for
+warmup_iters = 50  # 2000 # how many steps to warm up for
 lr_decay_iters = 200  # 600000 # should be ~= max_iters per Chinchilla
 min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP / FSDP2 settings
@@ -274,7 +274,7 @@ if block_size < model.config.block_size:
 model.to(device)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
+# scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 
 
 # compile the model
@@ -301,6 +301,8 @@ optimizer = model.configure_optimizers(
 if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
 checkpoint = None  # free up memory
+
+logger.info(f"model initialized, optimizer built")
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -355,12 +357,12 @@ while True:
         param_group["lr"] = lr
 
     # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0 and master_process:
+    if iter_num % eval_interval == 0:  #  and master_process:
         losses = estimate_loss()
-        print(
+        logger.info(
             f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
         )
-        if wandb_log:
+        if wandb_log and master_process:
             wandb.log(
                 {
                     "iter": iter_num,
@@ -370,7 +372,7 @@ while True:
                     "mfu": running_mfu * 100,  # convert to percentage
                 }
             )
-        if losses["val"] < best_val_loss or always_save_checkpoint:
+        if master_process and losses["val"] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses["val"]
             if iter_num > 0:
                 checkpoint = {
@@ -387,11 +389,13 @@ while True:
         break
 
     logits, loss = model(X, Y)
+
     X, Y = get_batch("train")  # fetch the next batch
     # todo - clip norm
     loss.backward()
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
+
     """
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
@@ -427,14 +431,14 @@ while True:
     t1 = time.time()
     dt = t1 - t0
     t0 = t1
-    if iter_num % log_interval == 0 and master_process:
+    if iter_num % log_interval == 0:  #  and master_process:
         # get loss as float. note: this is a CPU-GPU sync point
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
         lossf = loss.item() * gradient_accumulation_steps
         if local_iter_num >= 5:  # let the training loop settle a bit
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
             running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
-        print(
+        logger.info(
             f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%"
         )
     iter_num += 1
@@ -443,6 +447,11 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
+
+logger.info("Training completed. Shutting down")
+if torch.distributed.get_rank() == 0:
+    logger.info("Sleeping 2 seconds for other ranks to complete")
+    time.sleep(2)
 
 if is_distributed:
     destroy_process_group()

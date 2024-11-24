@@ -71,7 +71,7 @@ def parallelize_nanogpt(
         reduce_dtype=torch.bfloat16,
     )
 
-    print("Applied FSDP to the model")
+    print("Applied FSDP2 to the model")
 
 
 def apply_fsdp(
@@ -89,7 +89,7 @@ def apply_fsdp(
     for layer_id, transformer_block in enumerate(
         model.transformer.h
     ):  # layers.items():
-        print(f"Applying FSDP to layer {layer_id}, {transformer_block}")
+        print(f"Applying FSDP to layer {layer_id}")  # , {transformer_block}")
         # As an optimization, do not reshard after forward for the last
         # transformer block since FSDP would prefetch it immediately
         reshard_after_forward = int(layer_id) < len(model.transformer.h) - 1
