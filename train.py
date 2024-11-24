@@ -26,7 +26,7 @@ import numpy as np
 import torch
 from fsdp_parallelize import parallelize_nanogpt
 
-from fsdp_utils import device_module, device_type, init_distributed
+from fsdp_utils import Color, device_module, device_type, init_distributed, NoColor
 from logging_utils import SingletonLogger
 from model import GPT, GPTConfig
 from parallel_dims import ParallelDims
@@ -89,6 +89,11 @@ config_keys = [
 exec(open("configurator.py").read())  # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 # -----------------------------------------------------------------------------
+
+
+# used for colorful printing
+use_color = True
+color = Color if use_color else NoColor
 
 # various inits, derived attributes, I/O setup
 is_distributed = int(os.environ.get("RANK", -1)) != -1  # is this a distributed run?
@@ -359,7 +364,7 @@ while True:
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0:  #  and master_process:
         losses = estimate_loss()
-        logger.info(
+        print(
             f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
         )
         if wandb_log and master_process:
@@ -438,9 +443,16 @@ while True:
         if local_iter_num >= 5:  # let the training loop settle a bit
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
             running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
-        logger.info(
-            f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%"
+        print(
+            f"{color.cyan}step: {iter_num:2}  "
+            f"{color.green}loss: {lossf:7.4f}  "
+            f"{color.yellow}time: {dt*1000:5.2f} ms  "
+            f"{color.magenta}mfu: {running_mfu*100:.2f}%{color.reset}"
         )
+
+        # logger.info(
+        #    f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%"
+        # )
     iter_num += 1
     local_iter_num += 1
 
