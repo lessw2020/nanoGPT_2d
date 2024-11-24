@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 import contextlib
 import gc
 import math
@@ -68,3 +74,59 @@ def init_distributed():
         backend=backend,
         timeout=timedelta(seconds=180),
     )
+
+
+# hardcoded BF16 type peak flops for NVIDIA A100, H100, and H200 GPU
+def get_peak_flops(device_name: str = None) -> int:
+    if not device_name:
+        device_type, device_module = (
+            get_device_info()
+        )  # default device_module:torch.cuda
+        device = torch.device("cuda")  # device object
+        device_name = device_module.get_device_name(device)
+        print(f"Using {device_name} for MFU calculations")
+
+    if "A100" in device_name:
+        # data from https://www.nvidia.com/en-us/data-center/a100/
+        return 312e12
+    elif "H100" in device_name:
+        # data from https://www.nvidia.com/en-us/data-center/h100/
+        # NOTE: Specifications are one-half lower without sparsity.
+        if "NVL" in device_name:
+            return 835e12
+        elif "PCIe" in device_name:
+            return 756e12
+        else:  # for H100 SXM and other variants
+            return 989e12
+    elif "H200" in device_name:
+        # data from https://www.nvidia.com/en-us/data-center/h200/
+        return 989e12
+    else:  # for other GPU types, assume A100
+        print(f"Peak flops undefined for: {device_name}, fallback to A100")
+        return 312e12
+
+
+@dataclass(frozen=True)
+class Color:
+    black = "\033[30m"
+    red = "\033[31m"
+    green = "\033[32m"
+    yellow = "\033[33m"
+    blue = "\033[34m"
+    magenta = "\033[35m"
+    cyan = "\033[36m"
+    white = "\033[37m"
+    reset = "\033[39m"
+
+
+@dataclass(frozen=True)
+class NoColor:
+    black = ""
+    red = ""
+    green = ""
+    yellow = ""
+    blue = ""
+    magenta = ""
+    cyan = ""
+    white = ""
+    reset = ""
