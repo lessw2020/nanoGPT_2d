@@ -7,10 +7,12 @@
 # This file applies the PT-D parallelisms (except pipeline parallelism) and various
 # training techniques (e.g. activation checkpointing and compile) to the NanoGPT model.
 
+import time
 from collections import defaultdict
 
 import torch
 import torch.nn as nn
+from logging_utils import SingletonLogger
 from parallel_dims import ParallelDims
 
 from torch.distributed import DeviceMesh
@@ -24,6 +26,27 @@ from torch.distributed._tensor import Replicate, Shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper as ptd_checkpoint_wrapper,
 )
+
+logger = SingletonLogger.get_logger()
+
+
+def apply_compile(model: nn.Module):
+    """
+    Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
+    repeated structure. Alternatively one can compile the whole model (after applying DP).
+    """
+    logger.info("Compiling each TransformerBlock with torch.compile")
+    # logger.info(f"{model.transformer = }, model.transformer.h = {model.transformer.h}")
+    for layer_id, transformer_block in enumerate(model.transformer.h):
+        # logger.info(f"Compiling layer {layer_id} , {transformer_block}")
+        time.sleep(1)  # to make sure the layer_id is different
+        transformer_block = torch.compile(transformer_block, fullgraph=True)
+        model.transformer.h.register_module(str(layer_id), transformer_block)
+
+    logger.info("Compiled each TransformerBlock with torch.compile")
+    logger.info(f"{model.transformer = }, model.transformer.h = {model.transformer.h}")
+    # assert False, "inspect"
+    return model
 
 
 def parallelize_nanogpt(

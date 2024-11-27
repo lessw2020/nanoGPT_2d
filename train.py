@@ -24,7 +24,8 @@ from contextlib import nullcontext
 
 import numpy as np
 import torch
-from fsdp_parallelize import parallelize_nanogpt
+from float8 import Float8Handler
+from fsdp_parallelize import apply_compile, parallelize_nanogpt
 
 from fsdp_utils import Color, device_module, device_type, init_distributed, NoColor
 from logging_utils import SingletonLogger
@@ -32,6 +33,7 @@ from model import GPT, GPTConfig
 from parallel_dims import ParallelDims
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
+
 
 logger = SingletonLogger.get_logger()
 
@@ -278,11 +280,24 @@ if block_size < model.config.block_size:
     )
 model.to(device)
 
+use_float8 = True
+if use_float8:
+    float8_handler = Float8Handler()
+    logger.info(f"preparing model for fp8, float8_handler: {float8_handler}")
+    float8_handler.convert_to_float8_training(model)
+    logger.info(f"model prepared for fp8 {model=}")
+
 # initialize a GradScaler. If enabled=False scaler is a no-op
 # scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 
 
 # compile the model
+use_compile = False
+if use_compile:
+    apply_compile(model)
+    logger.info(f"model compiled via block compilation")
+logger.info(f"{model=}")
+
 """if compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
@@ -293,6 +308,7 @@ model.to(device)
     model = DDP(model, device_ids=[ddp_local_rank])
 """
 # apply FSDP2 to the model
+logger.info(f"parallelizing the model with FSDP2")
 parallelize_nanogpt(model, world_mesh, parallel_dims)  # todo - configs
 
 model._init_weights(model)

@@ -13,8 +13,10 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+from adopt import ADOPT
 from fsdp_utils import get_peak_flops
 from torch.nn import functional as F
+from triton_adamw import TritonAdamW
 
 
 class LayerNorm(nn.Module):
@@ -132,6 +134,9 @@ class Block(nn.Module):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
+
+    # def __call__(self, x):
+    #    return self.forward(x)
 
 
 @dataclass
